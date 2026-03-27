@@ -1,0 +1,8 @@
+/data/
+scratch.txt
+.idea/
+*.iml
+__pycache__/
+.ipynb_checkpoints/
+venv/
+README.md
