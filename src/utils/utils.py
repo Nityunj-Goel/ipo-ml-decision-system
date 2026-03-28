@@ -1,6 +1,8 @@
+from os import PathLike
 from pathlib import Path
 import pandas as pd
 
+date_cols = ['ipoStartDate', 'ipoEndDate', '~IPO_Listing_Date']
 
 def find_project_root(start: Path = None) -> Path:
     if start is None:
@@ -12,6 +14,9 @@ def find_project_root(start: Path = None) -> Path:
 
     raise RuntimeError("Project root not found")
 
-def save_dataframe_to_csv(df: pd.DataFrame, path: Path, *args, **kwargs):
+def read_dataframe_from_csv(path: PathLike) -> pd.DataFrame:
+    return pd.read_csv(path, parse_dates=date_cols, date_format="%Y-%m-%dT%H:%M:%S.%fZ")
+
+def save_dataframe_to_csv(df: pd.DataFrame, path: PathLike, *args, **kwargs):
     kwargs['index'] = False
     df.to_csv(path, *args, **kwargs)
