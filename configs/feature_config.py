@@ -33,12 +33,13 @@ RAW_FEATURES = {
     "id": "~id",
 }
 
-ENGINEERED_FEATURES = {
+DERIVED_FEATURES = {
     "qib_ratio": "qib_ratio",
     "retail_ratio": "retail_ratio",
     "nii_ratio": "nii_ratio",
     "log_issue_amount": "log_issue_amount",
     "log_total": "log_total",
+    "is_gmp_missing": "is_gmp_missing"
 }
 
 # Model input
@@ -47,9 +48,9 @@ FINAL_FEATURES = [
     RAW_FEATURES["qib"],
     RAW_FEATURES["retail"],
     RAW_FEATURES["total"],
-    ENGINEERED_FEATURES["qib_ratio"],
-    ENGINEERED_FEATURES["retail_ratio"],
-    ENGINEERED_FEATURES["nii_ratio"],
+    DERIVED_FEATURES["qib_ratio"],
+    DERIVED_FEATURES["retail_ratio"],
+    DERIVED_FEATURES["nii_ratio"],
     RAW_FEATURES["year"],
     RAW_FEATURES["issue_amount"],
     RAW_FEATURES["price_band_high"],

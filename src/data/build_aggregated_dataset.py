@@ -1,7 +1,7 @@
 from data_collection import *
-from src.utils.utils import find_project_root
+from src.utils.utils import get_project_root
 
-root = find_project_root()
+root = get_project_root()
 cleaned_dir_base = root / "data" / "filtered"
 aggregated_dir_base = root / "data" / "aggregated"
 

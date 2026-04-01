@@ -2,7 +2,7 @@ import pandas as pd
 from os import PathLike
 from pathlib import Path
 
-def find_project_root(start: Path = None) -> Path:
+def get_project_root(start: Path = None) -> Path:
     if start is None:
         start = Path(__file__).resolve()
 
