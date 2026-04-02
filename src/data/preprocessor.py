@@ -4,7 +4,9 @@ from configs.feature_config import RAW_FEATURES
 
 redundant_cols = [
     RAW_FEATURES['issue_open_date'],
-    RAW_FEATURES['closing_date']
+    RAW_FEATURES['closing_date'],
+    RAW_FEATURES['id'],
+    RAW_FEATURES['company'],
 ]
 percent_columns = [
     RAW_FEATURES['roce'],
@@ -57,4 +59,4 @@ def _handle_nans(df: pd.DataFrame):
         RAW_FEATURES["issue_amount"]
     ]
     for c in nan_cols:
-        df[nan_cols] = df[nan_cols].fillna(df[nan_cols].median())
+        df[c] = df[c].fillna(df[c].median())
