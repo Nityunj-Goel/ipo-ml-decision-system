@@ -1,3 +1,7 @@
+from typing import Literal
+
+CleaningMode = Literal['strict', 'unstrict']
+
 RAW_FEATURES = {
     "assets": "Assets (Rs.cr.)",
     "company": "Company",
@@ -56,6 +60,7 @@ FINAL_FEATURES = [
     RAW_FEATURES["price_band_high"],
     RAW_FEATURES["price_band_low"],
     RAW_FEATURES["gmp"],
+    DERIVED_FEATURES['is_gmp_missing'],
 ]
 
 TARGET = {

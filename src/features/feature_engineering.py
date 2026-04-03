@@ -18,7 +18,7 @@ def build_derived_features(df: pd.DataFrame) -> pd.DataFrame:
     df[nii_ratio] = df[nii] / total
     df[nii_ratio] = df[nii_ratio].fillna(0)
 
-    df[is_gmp_missing] = df[gmp].isna()
+    df[is_gmp_missing] = df[gmp].isna().astype(int)
     df[gmp] = df[gmp].fillna(0)
 
     return df
