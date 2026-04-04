@@ -33,7 +33,7 @@ class DataCleaner(BaseEstimator, TransformerMixin):
     """
 
     def __init__(self, mode: CleaningMode = 'strict'):
-        self.medians_: pd.Series = None
+        self.medians_: pd.Series | None = None
         self.mode = mode
 
     def fit(self, X: pd.DataFrame, y=None):

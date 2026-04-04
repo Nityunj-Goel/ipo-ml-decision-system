@@ -14,15 +14,21 @@ _LOG_COLS = [
     RAW_FEATURES["qib"],
     RAW_FEATURES["retail"],
     RAW_FEATURES["total"],
-    RAW_FEATURES['gmp'],
 ]
 
 # Everything in FINAL_FEATURES that isn't log-transformed or boolean
-_NUMERIC_COLS = [f for f in FINAL_FEATURES if f not in _LOG_COLS + [DERIVED_FEATURES["is_gmp_missing"]]]
+_NUMERIC_COLS = [f for f in FINAL_FEATURES if f not in _LOG_COLS + [DERIVED_FEATURES["is_gmp_missing"], RAW_FEATURES['gmp']]]
+
+def _signed_log_transform(x):
+    return np.sign(x) * np.log1p(np.abs(x))
 
 
 def get_logistic_regression_pipeline(**log_reg_kwargs) -> Pipeline:
     preprocessor = ColumnTransformer([
+        ("signed_log", Pipeline([
+            ("signed_log_transform", FunctionTransformer(_signed_log_transform, validate=False)),
+            ("scale", StandardScaler()),
+        ]), [RAW_FEATURES['gmp']]),
         ("log", Pipeline([
             ("log1p", FunctionTransformer(np.log1p, validate=False)),
             ("scale", StandardScaler()),
