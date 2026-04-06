@@ -7,15 +7,16 @@ from configs.feature_config import RAW_FEATURES
 from src.models.eval import plot_roc_curve_and_auc
 from src.pipelines import data_pipeline, pipeline_factory
 from src.utils.utils import load_config, load_raw_dataset
-from src.models.trainer import train
+from src.models.trainer import train    # Ensure this gets used here
 
-
+# DON'T TEST ON TEST SET HERE
 def run_time_series_training_loop(
     model_type: str,
     n_splits: int = 5,
     holdout_size: float = 0.15,
     listing_gain_threshold_perc: float | None = None,
-    plot_holdout_roc: bool = True,  # might set this to false
+    plot_holdout_roc: bool = True,
+    **model_kwargs
 ):
     # Load the raw dataset and configuration needed to derive the target label.
     df = load_raw_dataset()
@@ -48,7 +49,7 @@ def run_time_series_training_loop(
         y_train, y_val = y_cv.iloc[tr_idx], y_cv.iloc[val_idx]
 
         # Create and fit a fresh pipeline so each fold is trained independently.
-        pipeline = pipeline_factory.get_pipeline(model_type)
+        pipeline = pipeline_factory.get_pipeline(model_type, **model_kwargs)
         pipeline.fit(X_train, y_train)
 
         # Generate class predictions and positive-class probabilities for fold
@@ -70,7 +71,7 @@ def run_time_series_training_loop(
 
     # Retrain the selected pipeline on the entire cross-validation window
     # before evaluating on the unseen holdout set.
-    final_pipeline = pipeline_factory.get_pipeline(model_type)
+    final_pipeline = pipeline_factory.get_pipeline(model_type, **model_kwargs)
     final_pipeline.fit(X_cv, y_cv)
 
     # Score the holdout set, and compute holdout AUC only when both classes are

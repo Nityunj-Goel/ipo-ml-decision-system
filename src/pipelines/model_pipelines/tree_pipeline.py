@@ -16,7 +16,7 @@ _LOG_COLS = [
 _PASSTHROUGH_COLS = [f for f in FINAL_FEATURES if f not in _LOG_COLS]
 
 
-def get_tree_pipeline() -> Pipeline:
+def get_tree_pipeline(**model_kwargs) -> Pipeline:
     preprocessor = ColumnTransformer([
         ("log", FunctionTransformer(np.log1p, validate=False), _LOG_COLS),
         ("pass", "passthrough", _PASSTHROUGH_COLS),
@@ -24,5 +24,5 @@ def get_tree_pipeline() -> Pipeline:
 
     return Pipeline([
         ("preprocessor", preprocessor),
-        ("model", RandomForestClassifier(n_estimators=200, random_state=42)),
+        ("model", RandomForestClassifier(**model_kwargs)),
     ])

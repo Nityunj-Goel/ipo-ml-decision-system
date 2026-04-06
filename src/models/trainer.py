@@ -3,7 +3,7 @@ from sklearn.pipeline import Pipeline
 from src.pipelines import data_pipeline, pipeline_factory
 
 
-def train(X: pd.DataFrame, model_type: str, listing_gain_threshold_perc: float = 5.0) -> Pipeline:
+def train(X: pd.DataFrame, model_type: str, listing_gain_threshold_perc: float = 5.0, **model_kwargs) -> Pipeline:
     """
     Train a model pipeline on the provided dataset.
 
@@ -20,7 +20,7 @@ def train(X: pd.DataFrame, model_type: str, listing_gain_threshold_perc: float =
         A fitted sklearn Pipeline.
     """
     y = data_pipeline.compute_target(X, listing_gain_threshold=listing_gain_threshold_perc)
-    pipeline = pipeline_factory.get_pipeline(model_type)
+    pipeline = pipeline_factory.get_pipeline(model_type, **model_kwargs)
     
     print(f'Training model: {model_type} with threshold {listing_gain_threshold_perc}%...')
     
