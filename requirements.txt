@@ -1,0 +1,6 @@
+pandas~=2.3.3
+scikit-learn~=1.8.0
+PyYAML~=6.0.3
+numpy~=2.3.5
+matplotlib~=3.10.8
+sympy~=1.13.1

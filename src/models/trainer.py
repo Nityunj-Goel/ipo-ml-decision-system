@@ -22,7 +22,7 @@ def train(X: pd.DataFrame, model_type: str, listing_gain_threshold_perc: float =
     y = data_pipeline.compute_target(X, listing_gain_threshold=listing_gain_threshold_perc)
     pipeline = pipeline_factory.get_pipeline(model_type, **model_kwargs)
     
-    print(f'Training model: {model_type} with threshold {listing_gain_threshold_perc}%...')
+    print(f'Training model: {model_type} with threshold {listing_gain_threshold_perc}%')
     
     pipeline.fit(X, y)
     return pipeline

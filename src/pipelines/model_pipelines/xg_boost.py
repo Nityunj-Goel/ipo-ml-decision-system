@@ -1,8 +1,7 @@
-"""Tree-based model pipeline: minimal preprocessing → RandomForestClassifier."""
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import FunctionTransformer
-from sklearn.ensemble import RandomForestClassifier
+from xgboost import XGBClassifier
 import numpy as np
 
 from configs.feature_config import RAW_FEATURES, FINAL_FEATURES
@@ -16,13 +15,12 @@ _LOG_COLS = [
 _PASSTHROUGH_COLS = [f for f in FINAL_FEATURES if f not in _LOG_COLS]
 
 
-def get_tree_pipeline(**model_kwargs) -> Pipeline:
+def get_xgboost_pipeline(**model_kwargs) -> Pipeline:
     preprocessor = ColumnTransformer([
         ("log", FunctionTransformer(np.log1p, validate=False), _LOG_COLS),
         ("pass", "passthrough", _PASSTHROUGH_COLS),
     ], remainder="drop")
 
     return Pipeline([
-        ("preprocessor", preprocessor),
-        ("model", RandomForestClassifier(**model_kwargs)),
+        ("model", XGBClassifier(**model_kwargs)),
     ])

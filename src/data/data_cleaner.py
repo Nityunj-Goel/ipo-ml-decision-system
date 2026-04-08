@@ -7,6 +7,9 @@ _REDUNDANT_COLS = [
     RAW_FEATURES['closing_date'],
     RAW_FEATURES['id'],
     RAW_FEATURES['company'],
+    # Used for target computation but not needed for modeling. Dropping to avoid leakage.
+    RAW_FEATURES['issue_price'],
+    RAW_FEATURES['listing_price'],
 ]
 _PERCENT_COLS = [
     RAW_FEATURES['roce'],

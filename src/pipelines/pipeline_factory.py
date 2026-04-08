@@ -5,13 +5,17 @@ for a given model type.
 from sklearn.pipeline import Pipeline
 
 from src.pipelines.data_pipeline import get_data_pipeline
+from src.pipelines.model_pipelines.light_gbm import get_lightgbm_pipeline
 from src.pipelines.model_pipelines.logistic_regression import get_logistic_regression_pipeline
-from src.pipelines.model_pipelines.tree_pipeline import get_tree_pipeline
+from src.pipelines.model_pipelines.random_forest import get_random_forest_pipeline
 from configs.feature_config import CleaningMode
+from src.pipelines.model_pipelines.xg_boost import get_xgboost_pipeline
 
 _MODEL_PIPELINES = {
     "logistic_regression": get_logistic_regression_pipeline,
-    "tree": get_tree_pipeline,
+    "random_forest": get_random_forest_pipeline,
+    "xgboost": get_xgboost_pipeline,
+    "lightgbm": get_lightgbm_pipeline,
 }
 
 

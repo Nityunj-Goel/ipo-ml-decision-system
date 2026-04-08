@@ -1,2 +1,7 @@
 target:
   listing_gain_threshold_perc: 5
+
+cv:
+  n_splits: 5
+  gap: 30
+  holdout_fraction: 0.15
