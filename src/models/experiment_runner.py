@@ -20,6 +20,26 @@ def run_cv_experiment(
     verbose: bool = False,
     **model_kwargs
 ):
+    """Run time-series cross-validation for a model and train a final estimator.
+
+    Args:
+        model_type: Identifier of the model pipeline to train.
+        n_splits: Number of TimeSeriesSplit folds. Uses config default when None.
+        gap: Number of samples excluded between train and validation windows.
+            Uses config default when None.
+        holdout_fraction: Fraction of most recent IPO rows reserved as holdout.
+            Uses config default when None.
+        listing_gain_threshold_perc: Threshold used to binarize listing gain
+            target. Uses config default when None.
+        verbose: If True, prints per-fold summary and averaged classification
+            metrics.
+        **model_kwargs: Extra keyword arguments forwarded to the model trainer.
+
+    Returns:
+        A dictionary containing fold-level AUC metrics, aggregated CV AUC
+        statistics, the final pipeline fitted on the CV window, and the
+        holdout split as (X_holdout, y_holdout).
+    """
     df = load_raw_dataset()
     config = load_config()
     date_col = RAW_FEATURES['listing_date']

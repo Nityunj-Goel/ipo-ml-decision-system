@@ -5,11 +5,9 @@ for a given model type.
 from sklearn.pipeline import Pipeline
 
 from src.pipelines.data_pipeline import get_data_pipeline
-from src.pipelines.model_pipelines.light_gbm import get_lightgbm_pipeline
 from src.pipelines.model_pipelines.logistic_regression import get_logistic_regression_pipeline
-from src.pipelines.model_pipelines.random_forest import get_random_forest_pipeline
+from src.pipelines.model_pipelines.trees import get_random_forest_pipeline, get_xgboost_pipeline, get_lightgbm_pipeline
 from configs.feature_config import CleaningMode
-from src.pipelines.model_pipelines.xg_boost import get_xgboost_pipeline
 
 _MODEL_PIPELINES = {
     "logistic_regression": get_logistic_regression_pipeline,
