@@ -5,3 +5,22 @@ cv:
   n_splits: 5
   gap: 30
   holdout_fraction: 0.15
+
+logistic_regression:
+  C: 0.009061642080807474
+  l1_ratio: 0.18264649920874743   # 0 < l1_ratio < 1 indicates elasticnet penalty
+  solver: "saga"
+  max_iter: 1000
+  class_weight: "balanced"
+  random_state: 42
+
+lightgbm:
+  n_estimators: 266
+  learning_rate: 0.01188996214597206
+  num_leaves: 58
+  max_depth: 6
+  min_child_samples: 13
+  subsample: 0.8275336294975119
+  colsample_bytree: 0.646361426224116
+  reg_alpha: 0.00657760571422226
+  reg_lambda: 0.002292584023916076
