@@ -1,0 +1,1 @@
+This file will contain knowledge about all the technical decisions and tradeoffs that had been taken in this project. If not needed and everything gets covered in readme, feel free to delete this 

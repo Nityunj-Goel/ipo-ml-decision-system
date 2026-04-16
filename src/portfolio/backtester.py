@@ -3,6 +3,7 @@ import math
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import TimeSeriesSplit
+from typing import List, Dict
 
 from configs.feature_config import RAW_FEATURES, TARGET
 from src.models.trainer import train
@@ -10,23 +11,16 @@ from src.portfolio.allocator import compute_allocation
 from src.utils.utils import load_config, load_raw_dataset
 
 
-def _compute_listing_gain_pct(df: pd.DataFrame) -> pd.Series:
-    return (
-        (df[TARGET["listing_price"]] - df[TARGET["issue_price"]])
-        / df[TARGET["issue_price"]]
-        * 100
-    )
-
-
 def run_backtest(
     model_type: str,
-    t_min: float,
-    alpha: float,
+    t_min: float | None = None,
+    alpha: float | None = None,
     n_splits: int | None = None,
     gap: int | None = None,
     holdout_fraction: float | None = None,
     listing_gain_threshold_perc: float | None = None,
     verbose: bool = False,
+    from_year: int | None = None,
     **model_kwargs,
 ) -> dict:
     """Backtest the full trading strategy across time-series folds.
@@ -39,8 +33,10 @@ def run_backtest(
 
     Args:
         model_type: Pipeline key (e.g. ``"logistic_regression"``).
-        t_min: Minimum probability threshold passed to the allocator.
-        alpha: Concentration exponent passed to the allocator.
+        t_min: Minimum probability threshold passed to the allocator
+            (config default if None).
+        alpha: Concentration exponent passed to the allocator
+            (config default if None).
         n_splits: Number of TimeSeriesSplit folds (config default if None).
         gap: Gap between train and test windows (config default if None).
         holdout_fraction: Fraction of recent rows held out (config default
@@ -54,11 +50,14 @@ def run_backtest(
         Dictionary with per-fold details, overall mean return, and the
         holdout split for further analysis.
     """
-    df = load_raw_dataset()
+    df = load_raw_dataset(from_year)
     config = load_config()
     listing_date_col = RAW_FEATURES["listing_date"]
     cv_cfg = config["cv"]
+    portfolio_cfg = config["portfolio"]
 
+    t_min = t_min if t_min is not None else portfolio_cfg["trade_threshold"]
+    alpha = alpha if alpha is not None else portfolio_cfg["alpha"]
     n_splits = n_splits if n_splits is not None else cv_cfg["n_splits"]
     gap = gap if gap is not None else cv_cfg["gap"]
     holdout_fraction = holdout_fraction if holdout_fraction is not None else cv_cfg["holdout_fraction"]
@@ -108,17 +107,18 @@ def run_backtest(
         })
 
         # 3. group by decision day (listing date)
-        day_returns = []
+        day_returns, daily_allocations = [], []
         for day, day_df in val_df.groupby("date", sort=False):
             probs = day_df["prob"].values
             returns = day_df["actual_return"].values
 
             # 4. compute allocation
-            weights = compute_allocation(probs, t_min=t_min, alpha=alpha)
+            weights = compute_allocation(probs, t_min=t_min, alpha=alpha, normalize=True)
 
             # 5. portfolio return for this day
             portfolio_return_day = float(np.sum(weights * returns))
             day_returns.append(portfolio_return_day)
+            daily_allocations.append(weights.sum())
 
             # if verbose:
             #     print(
@@ -128,23 +128,15 @@ def run_backtest(
             #         f"return={portfolio_return_day:+.2f}%"
             #     )
 
-        # 6. mean daily return for this fold
-        mean_fold_return = float(np.mean(day_returns)) if day_returns else 0.0
+        # 6. Financial metrics for this fold
+        metrics = compute_portfolio_metrics(day_returns, daily_allocations)
 
         fold_results.append({
             "fold": fold,
-            "n_days": len(day_returns),
-            "mean_daily_return": mean_fold_return,
+            **metrics
         })
 
-        if verbose:
-            print(
-                f"  Fold {fold} summary: {len(day_returns)} days, "
-                f"mean daily return = {mean_fold_return:+.2f}%\n"
-            )
-
     fold_df = pd.DataFrame(fold_results)
-    overall_mean_return = fold_df["mean_daily_return"].mean()
 
     # train final pipeline on full CV window
     final_pipeline = train(X_cv, model_type, listing_gain_threshold_perc=threshold, **model_kwargs)
@@ -160,15 +152,104 @@ def run_backtest(
         for _, row in fold_df.iterrows():
             print(
                 f"  Fold {int(row['fold'])}: "
-                f"{int(row['n_days'])} days, "
-                f"mean return = {row['mean_daily_return']:+.2f}%"
+                f"{int(row['num_days'])} days | "
+                f"mean_return = {row['mean_daily_return']:+.2f}% | "
+                f"win_rate = {row['win_rate']:.2%} | "
+                f"avg_alloc = {row['avg_allocation']:.2f} | "
+                f"traded_days = {row['pct_days_traded']:.2%} | "
+                f"volatilty = {row['volatility']:.2f} | "
+                f"sharpe = {row['sharpe_like']:.2f}"
             )
-        print(f"\n  Overall mean daily return: {overall_mean_return:+.2f}%")
+        print(f"\nOverall mean daily return: {fold_df['mean_daily_return'].mean():+.2f}%")
+        print(f"Overall mean win rate: {fold_df['win_rate'].mean():.2%}")
+        print(f"Overall average allocation: {fold_df['avg_allocation'].mean():+.2f}")
+        print(f"Overall mean % days traded: {fold_df['pct_days_traded'].mean():.2%}")
+        print(f"Overall mean volatility: {fold_df['volatility'].mean():+.2f}")
+        print(f"Overall mean sharpe like: {fold_df['sharpe_like'].mean():+.2f}")
         print("=" * 60)
 
     return {
         "fold_results": fold_df,
-        "mean_daily_return": overall_mean_return,
         "final_pipeline": final_pipeline,
         "holdout": X_holdout,
     }
+
+def compute_portfolio_metrics(day_returns: List[float], daily_allocations: List[float]) -> Dict[str, float]:
+    """
+    Compute key business metrics for the IPO allocation strategy.
+
+    Parameters
+    ----------
+    day_returns : list or np.ndarray
+        Portfolio return (%) for each decision day, computed as:
+            Σ (w_i × actual_return_i)
+
+    daily_allocations : list or np.ndarray
+        Total capital allocated each day, computed as:
+            Σ w_i
+        (values in [0, 1], where 1 means fully deployed capital)
+
+    Returns
+    -------
+    dict
+        Dictionary containing:
+
+        - mean_daily_return : float
+            Average return per decision day (%)
+
+        - cumulative_return : float
+            Compounded return across all days (%)
+
+        - num_days : int
+            Number of decision days
+
+        - pct_days_traded : float
+            Fraction of days where some capital was deployed
+
+        - avg_allocation : float
+            Average capital deployed per day
+
+        - win_rate : float
+            Fraction of days with positive portfolio return
+
+        - volatility : float
+            Standard deviation of daily returns (%)
+
+        - sharpe_like : float
+            Risk-adjusted return (mean / std)
+    """
+    day_returns = np.array(day_returns)
+    daily_allocations = np.array(daily_allocations)
+
+    num_days = len(day_returns)
+
+    mean_daily_return = np.mean(day_returns) if num_days else 0.0
+
+    pct_days_traded = np.mean(daily_allocations > 0) if num_days else 0.0
+
+    avg_allocation = np.mean(daily_allocations) if num_days else 0.0
+
+    win_rate = np.mean(day_returns > 0) if num_days else 0.0
+
+    volatility = np.std(day_returns) if num_days else 0.0
+
+    sharpe_like = (
+        (mean_daily_return / volatility) if volatility > 0 else 0.0
+    )
+
+    return {
+        "mean_daily_return": mean_daily_return,
+        "num_days": num_days,
+        "pct_days_traded": pct_days_traded,
+        "avg_allocation": avg_allocation,
+        "win_rate": win_rate,
+        "volatility": volatility,
+        "sharpe_like": sharpe_like,
+    }
+
+def _compute_listing_gain_pct(df: pd.DataFrame) -> pd.Series:
+    return (
+        (df[TARGET["listing_price"]] - df[TARGET["issue_price"]])
+        / df[TARGET["issue_price"]]
+        * 100
+    )

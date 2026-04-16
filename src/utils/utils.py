@@ -3,6 +3,9 @@ import yaml
 from os import PathLike
 from pathlib import Path
 
+from configs.feature_config import RAW_FEATURES
+
+
 def get_project_root(start: Path = None) -> Path:
     if start is None:
         start = Path(__file__).resolve()
@@ -19,9 +22,13 @@ def load_config() -> dict:
         return yaml.safe_load(f)
 
 
-def load_raw_dataset() -> pd.DataFrame:
+def load_raw_dataset(from_year: int | None = None) -> pd.DataFrame:
     root = get_project_root()
-    return pd.read_csv(root / "data" / "aggregated" / "dataset.csv")
+    df = pd.read_csv(root / "data" / "aggregated" / "dataset.csv")
+    if from_year is not None:
+        year = RAW_FEATURES["year"]
+        df = df[df[year] >= from_year].reset_index(drop=True)
+    return df
 
 
 def save_dataframe_to_csv(df: pd.DataFrame, path: PathLike, *args, **kwargs):
