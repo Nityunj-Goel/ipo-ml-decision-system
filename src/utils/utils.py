@@ -1,7 +1,9 @@
+import joblib
 import pandas as pd
 import yaml
 from os import PathLike
 from pathlib import Path
+from sklearn.pipeline import Pipeline
 
 from configs.feature_config import RAW_FEATURES
 
@@ -34,3 +36,12 @@ def load_raw_dataset(from_year: int | None = None) -> pd.DataFrame:
 def save_dataframe_to_csv(df: pd.DataFrame, path: PathLike, *args, **kwargs):
     kwargs['index'] = False
     df.to_csv(path, *args, **kwargs)
+
+
+def save_pipeline(pipeline: Pipeline, path: PathLike | None = None):
+    """Serialize a trained pipeline to disk so the API can load it."""
+    if path is None:
+        path = get_project_root() / "models" / "prediction_pipeline.joblib"
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(pipeline, path)

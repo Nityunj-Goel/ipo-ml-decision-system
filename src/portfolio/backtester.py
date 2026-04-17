@@ -157,7 +157,7 @@ def run_backtest(
                 f"win_rate = {row['win_rate']:.2%} | "
                 f"avg_alloc = {row['avg_allocation']:.2f} | "
                 f"traded_days = {row['pct_days_traded']:.2%} | "
-                f"volatilty = {row['volatility']:.2f} | "
+                f"volatility = {row['volatility']:.2f} | "
                 f"sharpe = {row['sharpe_like']:.2f}"
             )
         print(f"\nOverall mean daily return: {fold_df['mean_daily_return'].mean():+.2f}%")
