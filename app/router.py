@@ -12,9 +12,9 @@ router = APIRouter()
 def predict(body: PredictRequest, request: Request):
     start = time.perf_counter()
 
-    pipeline = request.app.state.inference_pipeline
+    service = request.app.state.inference_service
     ipos = [ipo.model_dump() for ipo in body.ipos]
-    probabilities, weights = pipeline.predict(ipos)
+    probabilities, weights = service.predict(ipos)
 
     allocations = [
         IpoAllocation(

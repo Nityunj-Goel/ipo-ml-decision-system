@@ -17,7 +17,7 @@ _MODEL_PIPELINES = {
 }
 
 
-def get_pipeline(model_type: str, training_mode: CleaningMode = "strict", **model_kwargs) -> Pipeline:
+def get_prediction_pipeline(model_type: str, training_mode: CleaningMode = "strict", **model_kwargs) -> Pipeline:
     data_pipeline = get_data_pipeline(mode=training_mode)
     model_pipeline = _MODEL_PIPELINES[model_type](**model_kwargs)
 

@@ -26,7 +26,8 @@ def load_config() -> dict:
 
 def load_raw_dataset(from_year: int | None = None) -> pd.DataFrame:
     root = get_project_root()
-    df = pd.read_csv(root / "data" / "aggregated" / "dataset.csv")
+    cfg = load_config()
+    df = pd.read_csv(root / cfg["paths"]["raw_dataset"])
     if from_year is not None:
         year = RAW_FEATURES["year"]
         df = df[df[year] >= from_year].reset_index(drop=True)
@@ -41,7 +42,8 @@ def save_dataframe_to_csv(df: pd.DataFrame, path: PathLike, *args, **kwargs):
 def save_pipeline(pipeline: Pipeline, path: PathLike | None = None):
     """Serialize a trained pipeline to disk so the API can load it."""
     if path is None:
-        path = get_project_root() / "models" / "prediction_pipeline.joblib"
+        cfg = load_config()
+        path = get_project_root() / cfg["paths"]["model"]
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(pipeline, path)

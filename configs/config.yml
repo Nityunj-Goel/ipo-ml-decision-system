@@ -1,3 +1,8 @@
+paths:
+  raw_dataset: "data/aggregated/dataset.csv"
+  model: "artifacts/models/prediction_pipeline.joblib"
+  logs: "logs"
+
 target:
   listing_gain_threshold_perc: 5
 

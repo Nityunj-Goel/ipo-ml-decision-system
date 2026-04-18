@@ -1,14 +1,14 @@
-import joblib
+"""
+App-layer adapter: translates API request dicts to the DataFrame format
+expected by the core InferencePipeline, then delegates to it.
+"""
 import numpy as np
 import pandas as pd
-from pathlib import Path
-from sklearn.pipeline import Pipeline
 
 from configs.feature_config import RAW_FEATURES
-from src.portfolio.allocator import compute_allocation
-from src.utils.utils import load_config
+from src.pipelines.inference_pipeline import InferencePipeline
 
-# Maps clean API field names → internal column names expected by the trained pipeline.
+# Maps API field names -> internal column names the trained pipeline expects.
 _FIELD_TO_COLUMN = {
     "nii": RAW_FEATURES["nii"],
     "qib": RAW_FEATURES["qib"],
@@ -22,32 +22,15 @@ _FIELD_TO_COLUMN = {
 }
 
 
-class InferencePipeline:
-    """Trained prediction pipeline + capital allocation logic.
+class InferenceService:
+    """Adapts API request payloads to the core InferencePipeline."""
 
-    Loaded once at application startup.  Call :meth:`predict` with a list
-    of IPO dicts (matching the API schema field names) to get back
-    predicted probabilities and portfolio allocation weights.
-    """
-
-    def __init__(
-        self,
-        model_path: Path,
-        t_min: float | None = None,
-        alpha: float | None = None,
-    ):
-        self._pipeline: Pipeline = joblib.load(model_path)
-        portfolio_cfg = load_config()["portfolio"]
-        self.t_min = t_min if t_min is not None else portfolio_cfg["trade_threshold"]
-        self.alpha = alpha if alpha is not None else portfolio_cfg["alpha"]
-        self._pos_idx = list(self._pipeline.classes_).index(1)
+    def __init__(self, pipeline: InferencePipeline):
+        self._pipeline = pipeline
 
     def predict(self, ipos: list[dict]) -> tuple[np.ndarray, np.ndarray]:
-        """Return (probabilities, allocation_weights) arrays aligned to input order."""
         df = self._to_dataframe(ipos)
-        probabilities = self._pipeline.predict_proba(df)[:, self._pos_idx]
-        weights = compute_allocation(probabilities, t_min=self.t_min, alpha=self.alpha)
-        return probabilities, weights
+        return self._pipeline.predict(df)
 
     @staticmethod
     def _to_dataframe(ipos: list[dict]) -> pd.DataFrame:
