@@ -1,6 +1,3 @@
-# Ignore notebooks in language stats
 *.ipynb linguist-vendored
-
-# Treat model files as binary
 *.pkl binary
 *.joblib binary

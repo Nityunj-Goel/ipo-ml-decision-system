@@ -253,3 +253,143 @@ def _compute_listing_gain_pct(df: pd.DataFrame) -> pd.Series:
         / df[TARGET["issue_price"]]
         * 100
     )
+
+
+def run_detailed_backtest(
+    model_type: str,
+    t_min: float | None = None,
+    alpha: float | None = None,
+    n_splits: int | None = None,
+    gap: int | None = None,
+    holdout_fraction: float | None = None,
+    listing_gain_threshold_perc: float | None = None,
+    from_year: int | None = None,
+    **model_kwargs,
+) -> dict:
+    """Walk-forward backtest producing a flat per-(date, IPO) trade ledger.
+
+    Each fold trains on the fold's train window and scores its val window,
+    giving every CV date a prediction from a model that never saw it.
+    The final pipeline is fit on the full CV window and used to score
+    the held-out tail. Holdout rows are tagged with ``is_holdout=True``.
+
+    Returns:
+        dict with:
+          - ``trades`` (pd.DataFrame): columns
+            ``[date, company, prob, weight, actual_return_pct,
+              contribution_pct, allocated, is_holdout]``.
+          - ``final_pipeline`` (sklearn.Pipeline): fit on full CV window.
+          - ``meta`` (dict): params + data range summary.
+    """
+    df = load_raw_dataset(from_year)
+    config = load_config()
+    listing_date_col = RAW_FEATURES["listing_date"]
+    end_date_col = RAW_FEATURES["ipo_end_date"]
+    company_col = RAW_FEATURES["company"]
+    cv_cfg = config["cv"]
+    portfolio_cfg = config["portfolio"]
+
+    t_min = t_min if t_min is not None else portfolio_cfg["trade_threshold"]
+    alpha = alpha if alpha is not None else portfolio_cfg["alpha"]
+    n_splits = n_splits if n_splits is not None else cv_cfg["n_splits"]
+    gap = gap if gap is not None else cv_cfg["gap"]
+    holdout_fraction = holdout_fraction if holdout_fraction is not None else cv_cfg["holdout_fraction"]
+    threshold = listing_gain_threshold_perc if listing_gain_threshold_perc is not None else config["target"]["listing_gain_threshold_perc"]
+
+    df[listing_date_col] = pd.to_datetime(df[listing_date_col]).dt.tz_localize(None)
+    df[end_date_col] = pd.to_datetime(df[end_date_col], errors="coerce").dt.tz_localize(None)
+
+    # impute missing end dates using median gap from listing date
+    known = df.dropna(subset=[end_date_col])
+    known = known[known[listing_date_col] >= known[end_date_col]]
+    median_gap = (known[listing_date_col] - known[end_date_col]).median()
+    mask = df[end_date_col].isna()
+    df.loc[mask, end_date_col] = df.loc[mask, listing_date_col] - median_gap
+
+    df = df.sort_values(end_date_col).reset_index(drop=True)
+
+    holdout_start = len(df) - math.ceil(len(df) * holdout_fraction)
+    X_cv = df.iloc[:holdout_start]
+    X_holdout = df.iloc[holdout_start:]
+
+    splitter = TimeSeriesSplit(n_splits=n_splits, gap=gap)
+    all_trades = []
+
+    # Walk-forward CV folds
+    for fold, (tr_idx, val_idx) in enumerate(splitter.split(X_cv), start=1):
+        X_train = X_cv.iloc[tr_idx]
+        X_val = X_cv.iloc[val_idx]
+        pipeline = train(X_train, model_type, listing_gain_threshold_perc=threshold, **model_kwargs)
+        fold_trades = _score_and_allocate(
+            pipeline, X_val, t_min, alpha,
+            end_date_col, company_col, is_holdout=False,
+        )
+        all_trades.append(fold_trades)
+
+    # Final pipeline: train on full CV window, score the holdout
+    final_pipeline = train(X_cv, model_type, listing_gain_threshold_perc=threshold, **model_kwargs)
+    holdout_trades = _score_and_allocate(
+        final_pipeline, X_holdout, t_min, alpha,
+        end_date_col, company_col, is_holdout=True,
+    )
+    all_trades.append(holdout_trades)
+
+    trades_df = pd.concat(all_trades, ignore_index=True).sort_values("date").reset_index(drop=True)
+
+    meta = {
+        "alpha": alpha,
+        "t_min": t_min,
+        "listing_gain_threshold_perc": threshold,
+        "model_type": model_type,
+        "n_splits": n_splits,
+        "gap": gap,
+        "holdout_fraction": holdout_fraction,
+        "data_range": {
+            "from": str(trades_df["date"].min().date()),
+            "to": str(trades_df["date"].max().date()),
+        },
+        "last_training_date": str(X_cv[end_date_col].max().date()),
+        "num_ipos_backtested": int(len(trades_df)),
+    }
+
+    return {"trades": trades_df, "final_pipeline": final_pipeline, "meta": meta}
+
+
+def _score_and_allocate(
+    pipeline,
+    X: pd.DataFrame,
+    t_min: float,
+    alpha: float,
+    end_date_col: str,
+    company_col: str,
+    is_holdout: bool,
+) -> pd.DataFrame:
+    """Score X, allocate per decision day, return flat per-IPO rows."""
+    pos_idx = list(pipeline.classes_).index(1)
+    probs = pipeline.predict_proba(X)[:, pos_idx]
+    actual_returns = _compute_listing_gain_pct(X).values
+
+    scored = pd.DataFrame({
+        "date": X[end_date_col].values,
+        "company": X[company_col].values,
+        "prob": probs,
+        "actual_return_pct": actual_returns,
+        "is_holdout": is_holdout,
+    })
+
+    def _alloc_one_day(group: pd.DataFrame) -> pd.DataFrame:
+        group = group.copy()
+        group["weight"] = compute_allocation(
+            group["prob"].values, t_min=t_min, alpha=alpha, normalize=True,
+        )
+        return group
+
+    scored = scored.groupby("date", group_keys=False).apply(_alloc_one_day)
+    scored["contribution_pct"] = scored["weight"] * scored["actual_return_pct"]
+    scored["allocated"] = scored["weight"] > 0
+
+    return scored[[
+        "date", "company", "prob", "weight",
+        "actual_return_pct", "contribution_pct",
+        "allocated", "is_holdout",
+    ]]
