@@ -25,11 +25,18 @@ def main(model_type: str = "logistic_regression") -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Running detailed walk-forward backtest ({model_type})...")
-    result = run_detailed_backtest(model_type=model_type)
+    result = run_detailed_backtest(model_type=model_type, **cfg[model_type])
     trades: pd.DataFrame = result["trades"]
     meta: dict = result["meta"]
 
-    # Write trade ledger
+    earliest_year = cfg["dashboard"]["earliest_reporting_year"]
+    trades = trades[trades["date"].dt.year >= earliest_year].reset_index(drop=True)
+    meta["num_ipos_backtested"] = int(len(trades))
+    meta["data_range"] = {
+        "from": str(trades["date"].min().date()),
+        "to": str(trades["date"].max().date()),
+    }
+
     trades_path = out_dir / "trades.csv"
     trades.to_csv(trades_path, index=False)
     print(f"Wrote {trades_path}  ({len(trades)} rows)")

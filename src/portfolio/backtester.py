@@ -388,6 +388,7 @@ def _score_and_allocate(
     scored["contribution_pct"] = scored["weight"] * scored["actual_return_pct"]
     scored["allocated"] = scored["weight"] > 0
 
+    # Only reorders columns
     return scored[[
         "date", "company", "prob", "weight",
         "actual_return_pct", "contribution_pct",
