@@ -14,13 +14,14 @@
   "num_ipos_backtested": 444,
   "holdout": {
     "num_days": 75,
+    "calendar_days": 366,
     "num_ipos": 108,
-    "mean_daily_return": 8.788007150683947,
+    "mean_daily_return": 8.788004895532183,
     "win_rate": 0.64,
-    "avg_allocation": 0.5091504057518031,
+    "avg_allocation": 0.5091505618553039,
     "pct_days_traded": 0.7333333333333333,
-    "volatility": 10.98763962833477,
-    "sharpe_like": 0.7998084618666923
+    "volatility": 10.987637576722307,
+    "sharpe_like": 0.7998084059625226
   },
   "example_day": {
     "date": "2024-12-24",
@@ -39,7 +40,7 @@
       },
       {
         "company": "Carraro India Ltd.",
-        "prob": 0.2187,
+        "prob": 0.2188,
         "weight": 0.0,
         "actual_return_pct": -7.53
       }

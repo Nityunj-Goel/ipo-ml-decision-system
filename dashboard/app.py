@@ -345,7 +345,8 @@ def _render_window_kpis(daily_view: pd.DataFrame) -> None:
 
     returns = daily_view["strategy_return_pct"].values
     allocs = daily_view["strategy_allocation"].values
-    num_days = len(returns)
+    num_ipo_days = len(returns)  # days on which IPO(s) were available
+    calendar_days = int((daily_view["date"].max() - daily_view["date"].min()).days) + 1
     num_ipos = int(daily_view["num_ipos"].sum())
     mean_r = float(np.mean(returns))
     vol = float(np.std(returns))
@@ -355,16 +356,26 @@ def _render_window_kpis(daily_view: pd.DataFrame) -> None:
     shr = (mean_r / vol) if vol > 0 else 0.0
     cum = float(((1 + returns / 100).prod() - 1) * 100)
 
-    cols = st.columns(9)
-    cols[0].metric("Days", num_days)
-    cols[1].metric("IPOs", num_ipos)
-    cols[2].metric("Cum return", f"{cum:+.2f}%")
-    cols[3].metric("Mean daily return", f"{mean_r:+.2f}%")
-    cols[4].metric("Win rate", f"{wr * 100:.1f}%")
-    cols[5].metric("Avg alloc", f"{alloc * 100:.1f}%")
-    cols[6].metric("% Days traded", f"{traded * 100:.1f}%")
-    cols[7].metric("Volatility", f"{vol:.2f}%")
-    cols[8].metric("Sharpe-like", f"{shr:+.2f}")
+    cols = st.columns(10)
+    cols[0].metric("Calendar days", calendar_days)
+    cols[1].metric(
+        "IPO trading days", num_ipo_days,
+        help="Trading days on which at least one IPO was available to evaluate.",
+    )
+    cols[2].metric("IPOs", num_ipos)
+    cols[3].metric("Cum return", f"{cum:+.2f}%")
+    cols[4].metric(
+        "Mean IPO-day return", f"{mean_r:+.2f}%",
+        help="Average portfolio return across IPO trading days.",
+    )
+    cols[5].metric("Win rate", f"{wr * 100:.1f}%")
+    cols[6].metric("Avg alloc", f"{alloc * 100:.1f}%")
+    cols[7].metric(
+        "% IPO days deployed", f"{traded * 100:.1f}%",
+        help="Fraction of IPO trading days on which capital was actually allocated.",
+    )
+    cols[8].metric("Volatility", f"{vol:.2f}%")
+    cols[9].metric("Sharpe-like", f"{shr:+.2f}")
 
 
 # ---------------------------------------------------------------------------
@@ -388,14 +399,21 @@ def render_header(meta: dict, github_url: str) -> None:
 def render_holdout_kpis(meta: dict) -> None:
     hd = meta.get("holdout", {})
     st.subheader("Live Simulation Performance on unseen data")
-    cols = st.columns(7)
-    cols[0].metric("Trading Days", hd.get("num_days", "—"))
-    cols[1].metric("IPOs Evaluated", hd.get("num_ipos", "—"))
-    cols[2].metric("Avg daily return", f"{hd.get('mean_daily_return', 0):+.2f}%")
-    cols[3].metric("Win rate", f"{hd.get('win_rate', 0) * 100:.1f}%")
-    cols[4].metric("Avg Capital allocation", f"{hd.get('avg_allocation', 0) * 100:.1f}%")
-    cols[5].metric("Return Volatility", f"{hd.get('volatility', 0):.2f}%")
-    cols[6].metric("Sharpe Ratio (Approx.)", f"{hd.get('sharpe_like', 0):+.2f}")
+    cols = st.columns(8)
+    cols[0].metric("Calendar days", hd.get("calendar_days", "—"))
+    cols[1].metric(
+        "IPO trading days", hd.get("num_days", "—"),
+        help="Trading days on which at least one IPO was available to evaluate.",
+    )
+    cols[2].metric("IPOs Evaluated", hd.get("num_ipos", "—"))
+    cols[3].metric(
+        "Mean IPO-day return", f"{hd.get('mean_daily_return', 0):+.2f}%",
+        help="Average portfolio return across IPO trading days.",
+    )
+    cols[4].metric("Win rate", f"{hd.get('win_rate', 0) * 100:.1f}%")
+    cols[5].metric("Avg Capital allocation", f"{hd.get('avg_allocation', 0) * 100:.1f}%")
+    cols[6].metric("Return Volatility", f"{hd.get('volatility', 0):.2f}%")
+    cols[7].metric("Sharpe Ratio (Approx.)", f"{hd.get('sharpe_like', 0):+.2f}")
 
 
 def render_body(trades: pd.DataFrame, daily: pd.DataFrame) -> None:

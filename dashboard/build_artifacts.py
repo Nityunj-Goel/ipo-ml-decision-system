@@ -69,9 +69,14 @@ def _compute_kpis(trades: pd.DataFrame) -> dict:
     num_days = len(returns)
     mean_r = float(np.mean(returns)) if num_days else 0.0
     vol = float(np.std(returns)) if num_days else 0.0
+    calendar_days = (
+        int((daily["date"].max() - daily["date"].min()).days) + 1
+        if num_days else 0
+    )
 
     return {
-        "num_days": num_days,
+        "num_days": num_days,          # IPO trading days (days with >=1 IPO)
+        "calendar_days": calendar_days,
         "num_ipos": int(len(trades)),
         "mean_daily_return": mean_r,
         "win_rate": float(np.mean(returns > 0)) if num_days else 0.0,
