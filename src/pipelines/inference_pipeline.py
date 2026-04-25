@@ -17,14 +17,13 @@ from src.portfolio.allocator import compute_allocation
 class InferencePipeline:
     """prediction_pipeline -> probability -> capital allocator -> % allocation per IPO."""
 
-    def __init__(self, fitted_prediction_pipeline: Pipeline, t_min: float, alpha: float):
+    def __init__(self, fitted_prediction_pipeline: Pipeline, t_min: float):
         check_is_fitted(fitted_prediction_pipeline)
         self._pipeline = fitted_prediction_pipeline
         self.t_min = t_min
-        self.alpha = alpha
         self._pos_idx = list(fitted_prediction_pipeline.classes_).index(1)
 
     def predict(self, X: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
         probabilities = self._pipeline.predict_proba(X)[:, self._pos_idx]
-        weights = compute_allocation(probabilities, t_min=self.t_min, alpha=self.alpha, normalize=True)
+        weights = compute_allocation(probabilities, t_min=self.t_min, normalize=True)
         return probabilities, weights

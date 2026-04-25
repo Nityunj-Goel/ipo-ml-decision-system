@@ -24,7 +24,6 @@ async def lifespan(app: FastAPI):
     inference_pipeline = InferencePipeline(
         fitted_prediction_pipeline=trained_pipeline,
         t_min=portfolio_cfg["trade_threshold"],
-        alpha=portfolio_cfg["alpha"],
     )
     app.state.inference_service = InferenceService(inference_pipeline)
     yield

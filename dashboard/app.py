@@ -17,15 +17,11 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.utils.utils import get_project_root, load_config
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
 
 METRICS = {
     "cum_return": "Cumulative Return",
     "mean_daily_return": "Mean Daily Return",
     "win_rate": "Win Rate",
-    "avg_allocation": "Average Allocation",
     "pct_days_traded": "% Days Traded",
     "volatility": "Volatility",
     "sharpe_like": "Sharpe-like Ratio",
@@ -33,7 +29,7 @@ METRICS = {
 DEFAULT_METRIC = "mean_daily_return"
 
 # Metrics whose raw value is a fraction in [0, 1] — we multiply by 100 for display.
-FRACTIONAL_METRICS = {"win_rate", "avg_allocation", "pct_days_traded"}
+FRACTIONAL_METRICS = {"win_rate", "pct_days_traded"}
 # Metrics already expressed in %. Displayed with a "%" suffix, no scaling.
 ALREADY_PERCENT_METRICS = {"mean_daily_return", "volatility"}
 
@@ -56,10 +52,6 @@ METRIC_DESCRIPTIONS = {
     "win_rate": (
         "Fraction of days with positive portfolio return; consistency. "
         "Formula: win_rate = (#days with portfolio_return_day > 0) / N."
-    ),
-    "avg_allocation": (
-        "Average fraction of capital deployed per day; utilization. "
-        "Formula: avg_allocation = (1 / N) · Σ (Σ wᵢ)_day."
     ),
     "pct_days_traded": (
         "Fraction of days where at least some capital was deployed; participation. "
@@ -85,6 +77,9 @@ def load_artifacts() -> tuple[pd.DataFrame, dict, str]:
     cfg = load_config()
     art_dir = root / cfg["paths"]["dashboard_artifacts"]
     trades = pd.read_csv(art_dir / "trades.csv", parse_dates=["date"])
+    # Derived: daily-portfolio contribution. Stripped from CSV to avoid storing
+    # a redundant column.
+    trades["contribution_pct"] = trades["weight"] * trades["actual_return_pct"]
     with open(art_dir / "meta.json") as f:
         meta = json.load(f)
     github_url = cfg.get("dashboard", {}).get("github_url", "#")
@@ -95,15 +90,11 @@ def load_artifacts() -> tuple[pd.DataFrame, dict, str]:
 def compute_daily(trades: pd.DataFrame) -> pd.DataFrame:
     """Aggregate per-IPO trades into per-day portfolio metrics + baselines."""
     def _day_row(g: pd.DataFrame) -> pd.Series:
-        above = g[g["prob"] >= 0.5]
         return pd.Series({
             "num_ipos": len(g),
             "strategy_return_pct": g["contribution_pct"].sum(),
             "strategy_allocation": g["weight"].sum(),
             "equal_weight_return_pct": g["actual_return_pct"].mean(),
-            "equal_weight_above_05_pct": (
-                above["actual_return_pct"].mean() if len(above) else np.nan
-            ),
         })
 
     daily = trades.groupby("date").apply(_day_row).reset_index()
@@ -351,31 +342,42 @@ def _render_window_kpis(daily_view: pd.DataFrame) -> None:
     mean_r = float(np.mean(returns))
     vol = float(np.std(returns))
     wr = float(np.mean(returns > 0))
-    alloc = float(np.mean(allocs))
     traded = float(np.mean(allocs > 0))
     shr = (mean_r / vol) if vol > 0 else 0.0
     cum = float(((1 + returns / 100).prod() - 1) * 100)
 
-    cols = st.columns(10)
-    cols[0].metric("Calendar days", calendar_days)
-    cols[1].metric(
-        "IPO trading days", num_ipo_days,
-        help="Trading days on which at least one IPO was available to evaluate.",
+    avg_per_calendar = (mean_r * num_ipo_days / calendar_days) if calendar_days else 0.0
+
+    r1 = st.columns(5)
+    r1[0].metric("Calendar Days", calendar_days)
+    r1[1].metric(
+        "IPO Trade Days", num_ipo_days,
+        help="Trading days on which at least one IPO was available.",
     )
-    cols[2].metric("IPOs", num_ipos)
-    cols[3].metric("Cum return", f"{cum:+.2f}%")
-    cols[4].metric(
-        "Mean IPO-day return", f"{mean_r:+.2f}%",
+    r1[2].metric("IPOs Evaluated", num_ipos)
+    r1[3].metric(
+        "Cumulative Return (Event-Compounded)", f"{cum:+.2f}%",
+        help="Compounded only across IPO trading days "
+             "(event-based, not continuous daily compounding).",
+    )
+    r1[4].metric(
+        "Avg Return per Trade Day", f"{mean_r:+.2f}%",
         help="Average portfolio return across IPO trading days.",
     )
-    cols[5].metric("Win rate", f"{wr * 100:.1f}%")
-    cols[6].metric("Avg alloc", f"{alloc * 100:.1f}%")
-    cols[7].metric(
-        "% IPO days deployed", f"{traded * 100:.1f}%",
+
+    r2 = st.columns(5)
+    r2[0].metric(
+        "Avg Return per Calendar Day", f"{avg_per_calendar:+.2f}%",
+        help="Avg return adjusted for inactive days (no IPOs). "
+             "Reflects true time-based performance.",
+    )
+    r2[1].metric("Win Rate (Trade Days)", f"{wr * 100:.1f}%")
+    r2[2].metric(
+        "% Trade Days Deployed", f"{traded * 100:.1f}%",
         help="Fraction of IPO trading days on which capital was actually allocated.",
     )
-    cols[8].metric("Volatility", f"{vol:.2f}%")
-    cols[9].metric("Sharpe-like", f"{shr:+.2f}")
+    r2[3].metric("Return Volatility (Trade Days)", f"{vol:.2f}%")
+    r2[4].metric("Sharpe Ratio (Trade-Day, Approx.)", f"{shr:+.2f}")
 
 
 # ---------------------------------------------------------------------------
@@ -386,9 +388,10 @@ def render_header(meta: dict, github_url: str) -> None:
     st.title("IPO Investment Decision System Performance Dashboard")
     st.markdown(
         f"A machine-learning based trading strategy that predicts the probability of Indian IPOs exceeding "
-        f"a **{meta['listing_gain_threshold_perc']}% listing-day gain** and constructs a daily portfolio "
-        f"using a probability-weighted allocation scheme. Rather than forecasting exact returns, the system treats "
-        f"model outputs as confidence signals, filtering and allocating capital to high-quality opportunities. "
+        f"a **{meta['listing_gain_threshold_perc']}% listing-day gain** and constructs a daily portfolio by "
+        f"**equally splitting capital across all IPOs whose predicted probability passes a learned threshold**. "
+        f"Rather than forecasting exact returns, the system treats model outputs as confidence signals to filter "
+        f"the daily opportunity set down to high-quality bets. "
         f"Results below are from a walk-forward backtest over **{meta['num_ipos_backtested']} IPOs** between "
         f"**{meta['data_range']['from']}** and **{meta['data_range']['to']}**. "
         f"[View on GitHub]({github_url})."
@@ -399,21 +402,33 @@ def render_header(meta: dict, github_url: str) -> None:
 def render_holdout_kpis(meta: dict) -> None:
     hd = meta.get("holdout", {})
     st.subheader("Live Simulation Performance on unseen data")
-    cols = st.columns(8)
-    cols[0].metric("Calendar days", hd.get("calendar_days", "—"))
-    cols[1].metric(
-        "IPO trading days", hd.get("num_days", "—"),
-        help="Trading days on which at least one IPO was available to evaluate.",
+
+    r1 = st.columns(5)
+    r1[0].metric("Calendar Days", hd.get("calendar_days", "—"))
+    r1[1].metric(
+        "IPO Trade Days", hd.get("num_days", "—"),
+        help="Trading days on which at least one IPO was available.",
     )
-    cols[2].metric("IPOs Evaluated", hd.get("num_ipos", "—"))
-    cols[3].metric(
-        "Mean IPO-day return", f"{hd.get('mean_daily_return', 0):+.2f}%",
+    r1[2].metric("IPOs Evaluated", hd.get("num_ipos", "—"))
+    r1[3].metric(
+        "Avg Return per Trade Day", f"{hd.get('mean_daily_return', 0):+.2f}%",
         help="Average portfolio return across IPO trading days.",
     )
-    cols[4].metric("Win rate", f"{hd.get('win_rate', 0) * 100:.1f}%")
-    cols[5].metric("Avg Capital allocation", f"{hd.get('avg_allocation', 0) * 100:.1f}%")
-    cols[6].metric("Return Volatility", f"{hd.get('volatility', 0):.2f}%")
-    cols[7].metric("Sharpe Ratio (Approx.)", f"{hd.get('sharpe_like', 0):+.2f}")
+    r1[4].metric(
+        "Avg Return per Calendar Day",
+        f"{hd.get('avg_return_per_calendar_day', 0):+.2f}%",
+        help="Avg return adjusted for inactive days (no IPOs). "
+             "Reflects true time-based performance.",
+    )
+
+    r2 = st.columns(4)
+    r2[0].metric("Win Rate (Trade Days)", f"{hd.get('win_rate', 0) * 100:.1f}%")
+    r2[1].metric(
+        "% Trade Days Deployed", f"{hd.get('pct_days_traded', 0) * 100:.1f}%",
+        help="Fraction of IPO trading days on which capital was actually allocated.",
+    )
+    r2[2].metric("Return Volatility (Trade Days)", f"{hd.get('volatility', 0):.2f}%")
+    r2[3].metric("Sharpe Ratio (Trade-Day, Approx.)", f"{hd.get('sharpe_like', 0):+.2f}")
 
 
 def render_body(trades: pd.DataFrame, daily: pd.DataFrame) -> None:
@@ -626,27 +641,27 @@ def render_baseline_chart(daily: pd.DataFrame) -> None:
     st.markdown("---")
     st.subheader("Baseline comparison")
     st.caption(
-        "**Strategy**: probability-weighted allocation above `t_min`. "
-        "**Equal-weight (all)**: 1/n on every IPO that day, uncapped. "
-        "**Equal-weight (prob ≥ 0.5)**: 1/k on IPOs with prob ≥ 0.5; cash on zero-k days."
+        "**Strategy**: 1/k on IPOs with prob ≥ learned `t_min`. "
+        "**Equal-weight (all)**: 1/n on every IPO that day (no filter)."
     )
     d = daily.copy()
     d["strategy_eq"] = 100 * (1 + d["strategy_return_pct"] / 100).cumprod()
     d["ew_eq"] = 100 * (1 + d["equal_weight_return_pct"].fillna(0) / 100).cumprod()
-    d["ew05_eq"] = 100 * (1 + d["equal_weight_above_05_pct"].fillna(0) / 100).cumprod()
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=d["date"], y=d["strategy_eq"], mode="lines", name="Strategy"))
     fig.add_trace(go.Scatter(x=d["date"], y=d["ew_eq"], mode="lines", name="Equal-weight (all)"))
-    fig.add_trace(go.Scatter(
-        x=d["date"], y=d["ew05_eq"], mode="lines", name="Equal-weight (prob ≥ 0.5)",
-    ))
     fig.update_layout(
         yaxis_title="Equity (indexed to 100, log scale)",
         xaxis_title="Date",
         hovermode="x unified",
         margin=dict(l=20, r=20, t=30, b=20),
         height=420,
+        legend=dict(
+            yanchor="top", y=0.99,
+            xanchor="left", x=0.01,
+            bgcolor="rgba(255,255,255,0.6)",
+        ),
     )
     grid = "lightgray"
     fig.update_xaxes(showgrid=True, gridcolor=grid, griddash="dot")
@@ -730,14 +745,12 @@ def render_api_form() -> None:
 def render_disclaimers(meta: dict) -> None:
     st.markdown("---")
     st.subheader("Disclaimers")
-    max_alloc = meta.get("max_allocation", 0.60)
     st.warning(
         f"- Assumes **100% IPO allotment** — real retail allotments are lottery-based.\n"
-        f"- Strategy parameters: **α = {meta['alpha']:.4f}**, "
-        f"**t_min = {meta['t_min']:.4f}**, "
+        f"- Strategy parameters: **t_min = {meta['t_min']:.4f}**, "
         f"**listing-gain threshold = {meta['listing_gain_threshold_perc']}%**.\n"
-        f"- **Max allocation = {max_alloc * 100:.0f}%** per IPO per day — guardrail to cap "
-        f"exposure to any single IPO and prevent heavy losses from a single bad bet.\n"
+        f"- Capital is split **equally** across all IPOs on a given day whose "
+        f"predicted probability meets `t_min` — no per-IPO cap.\n"
         f"- Last training date: **{meta.get('last_training_date', '—')}**.\n"
         f"- Transaction costs and taxes assumed zero.\n"
         f"- Not investment advice. Past performance does not guarantee future results."

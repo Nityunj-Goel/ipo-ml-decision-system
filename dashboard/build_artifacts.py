@@ -59,10 +59,14 @@ def _compute_kpis(trades: pd.DataFrame) -> dict:
     if trades.empty:
         return {}
 
-    daily = trades.groupby("date").agg(
-        portfolio_return=("contribution_pct", "sum"),
-        total_allocation=("weight", "sum"),
-    ).reset_index()
+    contrib = trades["weight"] * trades["actual_return_pct"]
+    daily = (
+        trades.assign(_contrib=contrib)
+        .groupby("date")
+        .agg(portfolio_return=("_contrib", "sum"),
+             total_allocation=("weight", "sum"))
+        .reset_index()
+    )
 
     returns = daily["portfolio_return"].values
     allocations = daily["total_allocation"].values
@@ -73,15 +77,23 @@ def _compute_kpis(trades: pd.DataFrame) -> dict:
         int((daily["date"].max() - daily["date"].min()).days) + 1
         if num_days else 0
     )
+    avg_return_per_calendar_day = (
+        (mean_r * num_days / calendar_days) if calendar_days else 0.0
+    )
+    avg_alloc = float(np.mean(allocations)) if num_days else 0.0
+    pct_traded = float(np.mean(allocations > 0)) if num_days else 0.0
+    capital_utilization = avg_alloc * pct_traded
 
     return {
         "num_days": num_days,          # IPO trading days (days with >=1 IPO)
         "calendar_days": calendar_days,
         "num_ipos": int(len(trades)),
         "mean_daily_return": mean_r,
+        "avg_return_per_calendar_day": avg_return_per_calendar_day,
         "win_rate": float(np.mean(returns > 0)) if num_days else 0.0,
-        "avg_allocation": float(np.mean(allocations)) if num_days else 0.0,
-        "pct_days_traded": float(np.mean(allocations > 0)) if num_days else 0.0,
+        "avg_allocation": avg_alloc,
+        "pct_days_traded": pct_traded,
+        "capital_utilization": capital_utilization,
         "volatility": vol,
         "sharpe_like": float(mean_r / vol) if vol > 0 else 0.0,
     }

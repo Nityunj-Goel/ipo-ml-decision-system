@@ -14,7 +14,6 @@ from src.utils.utils import load_config, load_raw_dataset
 def run_backtest(
     model_type: str,
     t_min: float | None = None,
-    alpha: float | None = None,
     n_splits: int | None = None,
     gap: int | None = None,
     holdout_fraction: float | None = None,
@@ -34,8 +33,6 @@ def run_backtest(
     Args:
         model_type: Pipeline key (e.g. ``"logistic_regression"``).
         t_min: Minimum probability threshold passed to the allocator
-            (config default if None).
-        alpha: Concentration exponent passed to the allocator
             (config default if None).
         n_splits: Number of TimeSeriesSplit folds (config default if None).
         gap: Gap between train and test windows (config default if None).
@@ -57,7 +54,6 @@ def run_backtest(
     portfolio_cfg = config["portfolio"]
 
     t_min = t_min if t_min is not None else portfolio_cfg["trade_threshold"]
-    alpha = alpha if alpha is not None else portfolio_cfg["alpha"]
     n_splits = n_splits if n_splits is not None else cv_cfg["n_splits"]
     gap = gap if gap is not None else cv_cfg["gap"]
     holdout_fraction = holdout_fraction if holdout_fraction is not None else cv_cfg["holdout_fraction"]
@@ -113,7 +109,7 @@ def run_backtest(
             returns = day_df["actual_return"].values
 
             # 4. compute allocation
-            weights = compute_allocation(probs, t_min=t_min, alpha=alpha, normalize=True)
+            weights = compute_allocation(probs, t_min=t_min, normalize=True)
 
             # 5. portfolio return for this day
             portfolio_return_day = float(np.sum(weights * returns))
@@ -147,7 +143,6 @@ def run_backtest(
         print("=" * 60)
         print(f"  Model:       {model_type}")
         print(f"  t_min:       {t_min}")
-        print(f"  alpha:       {alpha}")
         print(f"  Folds:       {n_splits}")
         for _, row in fold_df.iterrows():
             print(
@@ -258,7 +253,6 @@ def _compute_listing_gain_pct(df: pd.DataFrame) -> pd.Series:
 def run_detailed_backtest(
     model_type: str,
     t_min: float | None = None,
-    alpha: float | None = None,
     n_splits: int | None = None,
     gap: int | None = None,
     holdout_fraction: float | None = None,
@@ -277,7 +271,8 @@ def run_detailed_backtest(
         dict with:
           - ``trades`` (pd.DataFrame): columns
             ``[date, company, prob, weight, actual_return_pct,
-              contribution_pct, allocated, is_holdout]``.
+              allocated, is_holdout]``. Contribution to daily return is
+            ``weight * actual_return_pct`` and is left to the consumer.
           - ``final_pipeline`` (sklearn.Pipeline): fit on full CV window.
           - ``meta`` (dict): params + data range summary.
     """
@@ -290,7 +285,6 @@ def run_detailed_backtest(
     portfolio_cfg = config["portfolio"]
 
     t_min = t_min if t_min is not None else portfolio_cfg["trade_threshold"]
-    alpha = alpha if alpha is not None else portfolio_cfg["alpha"]
     n_splits = n_splits if n_splits is not None else cv_cfg["n_splits"]
     gap = gap if gap is not None else cv_cfg["gap"]
     holdout_fraction = holdout_fraction if holdout_fraction is not None else cv_cfg["holdout_fraction"]
@@ -321,7 +315,7 @@ def run_detailed_backtest(
         X_val = X_cv.iloc[val_idx]
         pipeline = train(X_train, model_type, listing_gain_threshold_perc=threshold, **model_kwargs)
         fold_trades = _score_and_allocate(
-            pipeline, X_val, t_min, alpha,
+            pipeline, X_val, t_min,
             end_date_col, company_col, is_holdout=False,
         )
         all_trades.append(fold_trades)
@@ -329,7 +323,7 @@ def run_detailed_backtest(
     # Final pipeline: train on full CV window, score the holdout
     final_pipeline = train(X_cv, model_type, listing_gain_threshold_perc=threshold, **model_kwargs)
     holdout_trades = _score_and_allocate(
-        final_pipeline, X_holdout, t_min, alpha,
+        final_pipeline, X_holdout, t_min,
         end_date_col, company_col, is_holdout=True,
     )
     all_trades.append(holdout_trades)
@@ -337,7 +331,6 @@ def run_detailed_backtest(
     trades_df = pd.concat(all_trades, ignore_index=True).sort_values("date").reset_index(drop=True)
 
     meta = {
-        "alpha": alpha,
         "t_min": t_min,
         "listing_gain_threshold_perc": threshold,
         "model_type": model_type,
@@ -359,7 +352,6 @@ def _score_and_allocate(
     pipeline,
     X: pd.DataFrame,
     t_min: float,
-    alpha: float,
     end_date_col: str,
     company_col: str,
     is_holdout: bool,
@@ -380,17 +372,15 @@ def _score_and_allocate(
     def _alloc_one_day(group: pd.DataFrame) -> pd.DataFrame:
         group = group.copy()
         group["weight"] = compute_allocation(
-            group["prob"].values, t_min=t_min, alpha=alpha, normalize=True,
+            group["prob"].values, t_min=t_min, normalize=True,
         )
         return group
 
     scored = scored.groupby("date", group_keys=False).apply(_alloc_one_day)
-    scored["contribution_pct"] = scored["weight"] * scored["actual_return_pct"]
     scored["allocated"] = scored["weight"] > 0
 
     # Only reorders columns
     return scored[[
         "date", "company", "prob", "weight",
-        "actual_return_pct", "contribution_pct",
-        "allocated", "is_holdout",
+        "actual_return_pct", "allocated", "is_holdout",
     ]]

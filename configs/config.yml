@@ -12,9 +12,7 @@ target:
   listing_gain_threshold_perc: 5
 
 portfolio:
-  max_allocation: 0.60
-  trade_threshold: 0.3933623644527928
-  alpha: 1.9877580169252183
+  trade_threshold: 0.4108141980880114
 
 cv:
   n_splits: 5
