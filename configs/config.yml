@@ -12,7 +12,7 @@ target:
   listing_gain_threshold_perc: 5
 
 portfolio:
-  trade_threshold: 0.4108141980880114
+  trade_threshold: 0.40912833214795347
 
 cv:
   n_splits: 5

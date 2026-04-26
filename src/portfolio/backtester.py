@@ -96,9 +96,15 @@ def run_backtest(
         val_probs = pipeline.predict_proba(X_val)[:, pos_idx]
         actual_returns = _compute_listing_gain_pct(X_val)
 
+        # NII subscription ratio → allotment fraction = 1 / max(1, S_i).
+        # Missing/NaN S is treated as fully allotted (allotment = 1.0).
+        nii_subs = pd.Series(X_val[RAW_FEATURES["nii"]].values).fillna(1.0).values
+        allotment = 1.0 / np.maximum(1.0, nii_subs)
+
         val_df = pd.DataFrame({
             "prob": val_probs,
             "actual_return": actual_returns.values,
+            "allotment": allotment,
             "date": X_val[end_date_col].values,
         })
 
@@ -107,12 +113,13 @@ def run_backtest(
         for day, day_df in val_df.groupby("date", sort=False):
             probs = day_df["prob"].values
             returns = day_df["actual_return"].values
+            allot = day_df["allotment"].values
 
             # 4. compute allocation
             weights = compute_allocation(probs, t_min=t_min, normalize=True)
 
-            # 5. portfolio return for this day
-            portfolio_return_day = float(np.sum(weights * returns))
+            # 5. portfolio return for this day (weight × allotment × return)
+            portfolio_return_day = float(np.sum(weights * allot * returns))
             day_returns.append(portfolio_return_day)
             daily_allocations.append(weights.sum())
 
@@ -271,8 +278,9 @@ def run_detailed_backtest(
         dict with:
           - ``trades`` (pd.DataFrame): columns
             ``[date, company, prob, weight, actual_return_pct,
-              allocated, is_holdout]``. Contribution to daily return is
-            ``weight * actual_return_pct`` and is left to the consumer.
+              allotment_ratio, allocated, is_holdout]``. Contribution to
+            daily return is ``weight * allotment_ratio * actual_return_pct``
+            and is left to the consumer.
           - ``final_pipeline`` (sklearn.Pipeline): fit on full CV window.
           - ``meta`` (dict): params + data range summary.
     """
@@ -361,11 +369,17 @@ def _score_and_allocate(
     probs = pipeline.predict_proba(X)[:, pos_idx]
     actual_returns = _compute_listing_gain_pct(X).values
 
+    # NII subscription ratio → retail allotment fraction = 1 / max(1, S_i).
+    # Missing/NaN subscription is treated as fully allotted (1.0).
+    nii_subs = pd.Series(X[RAW_FEATURES["nii"]].values).fillna(1.0).values
+    allotment_ratio = 1.0 / np.maximum(1.0, nii_subs)
+
     scored = pd.DataFrame({
         "date": X[end_date_col].values,
         "company": X[company_col].values,
         "prob": probs,
         "actual_return_pct": actual_returns,
+        "allotment_ratio": allotment_ratio,
         "is_holdout": is_holdout,
     })
 
@@ -382,5 +396,6 @@ def _score_and_allocate(
     # Only reorders columns
     return scored[[
         "date", "company", "prob", "weight",
-        "actual_return_pct", "allocated", "is_holdout",
+        "actual_return_pct", "allotment_ratio",
+        "allocated", "is_holdout",
     ]]

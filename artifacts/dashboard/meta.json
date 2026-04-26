@@ -1,5 +1,5 @@
 {
-  "t_min": 0.4108141980880114,
+  "t_min": 0.40912833214795347,
   "listing_gain_threshold_perc": 5,
   "model_type": "logistic_regression",
   "n_splits": 5,
@@ -15,14 +15,15 @@
     "num_days": 75,
     "calendar_days": 366,
     "num_ipos": 108,
-    "mean_daily_return": 12.55197967150475,
-    "avg_return_per_calendar_day": 2.5721269818657277,
-    "win_rate": 0.6266666666666667,
-    "avg_allocation": 0.7066666666666667,
-    "pct_days_traded": 0.7066666666666667,
-    "capital_utilization": 0.49937777777777775,
-    "volatility": 16.358711658947836,
-    "sharpe_like": 0.7672963454086623
+    "mean_daily_return": 0.20353845313200014,
+    "avg_return_per_calendar_day": 0.04170869941229511,
+    "cum_return": 16.37888427950085,
+    "win_rate": 0.6133333333333333,
+    "avg_allocation": 0.72,
+    "pct_days_traded": 0.72,
+    "capital_utilization": 0.5184,
+    "volatility": 0.4699511380057157,
+    "sharpe_like": 0.4331055649651914
   },
   "example_day": {
     "date": "2024-12-24",
@@ -31,19 +32,25 @@
         "company": "Senores Pharmaceuticals Ltd.",
         "prob": 0.833,
         "weight": 0.5,
-        "actual_return_pct": 51.84
+        "allotment_ratio": 0.0102,
+        "actual_return_pct": 51.84,
+        "allocated": true
       },
       {
         "company": "Ventive Hospitality Ltd.",
         "prob": 0.4564,
         "weight": 0.5,
-        "actual_return_pct": 11.35
+        "allotment_ratio": 0.0688,
+        "actual_return_pct": 11.35,
+        "allocated": true
       },
       {
         "company": "Carraro India Ltd.",
         "prob": 0.2187,
         "weight": 0.0,
-        "actual_return_pct": -7.53
+        "allotment_ratio": 1.0,
+        "actual_return_pct": -7.53,
+        "allocated": false
       }
     ]
   }

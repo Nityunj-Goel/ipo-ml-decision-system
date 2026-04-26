@@ -59,7 +59,7 @@ def _compute_kpis(trades: pd.DataFrame) -> dict:
     if trades.empty:
         return {}
 
-    contrib = trades["weight"] * trades["actual_return_pct"]
+    contrib = trades["weight"] * trades["allotment_ratio"] * trades["actual_return_pct"]
     daily = (
         trades.assign(_contrib=contrib)
         .groupby("date")
@@ -83,6 +83,9 @@ def _compute_kpis(trades: pd.DataFrame) -> dict:
     avg_alloc = float(np.mean(allocations)) if num_days else 0.0
     pct_traded = float(np.mean(allocations > 0)) if num_days else 0.0
     capital_utilization = avg_alloc * pct_traded
+    cum_return = (
+        float(((1.0 + returns / 100.0).prod() - 1.0) * 100.0) if num_days else 0.0
+    )
 
     return {
         "num_days": num_days,          # IPO trading days (days with >=1 IPO)
@@ -90,6 +93,7 @@ def _compute_kpis(trades: pd.DataFrame) -> dict:
         "num_ipos": int(len(trades)),
         "mean_daily_return": mean_r,
         "avg_return_per_calendar_day": avg_return_per_calendar_day,
+        "cum_return": cum_return,
         "win_rate": float(np.mean(returns > 0)) if num_days else 0.0,
         "avg_allocation": avg_alloc,
         "pct_days_traded": pct_traded,
@@ -128,7 +132,9 @@ def _pick_example_day(trades: pd.DataFrame) -> dict | None:
                 "company": str(row["company"]),
                 "prob": round(float(row["prob"]), 4),
                 "weight": round(float(row["weight"]), 4),
+                "allotment_ratio": round(float(row["allotment_ratio"]), 4),
                 "actual_return_pct": round(float(row["actual_return_pct"]), 2),
+                "allocated": bool(row["allocated"]),
             }
             for _, row in day_df.iterrows()
         ],

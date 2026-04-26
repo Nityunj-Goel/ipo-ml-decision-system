@@ -41,9 +41,8 @@ MIN_DAYS_FOR = {"volatility": 5, "sharpe_like": 5}
 
 METRIC_DESCRIPTIONS = {
     "cum_return": (
-        "Compounded return from the first decision day. "
-        "Plotted as equity indexed to 100 on a log y-axis so exponential growth reads linearly. "
-        "Formula: equity_t = 100 × ∏(1 + r_d / 100) over all daily portfolio returns up to t."
+        "Compounded return from the first decision day, expressed in %. "
+        "Formula: cum_return_t = (∏(1 + r_d / 100) − 1) × 100 over all daily portfolio returns up to t."
     ),
     "mean_daily_return": (
         "Average portfolio return per decision day; overall profitability. "
@@ -77,9 +76,11 @@ def load_artifacts() -> tuple[pd.DataFrame, dict, str]:
     cfg = load_config()
     art_dir = root / cfg["paths"]["dashboard_artifacts"]
     trades = pd.read_csv(art_dir / "trades.csv", parse_dates=["date"])
-    # Derived: daily-portfolio contribution. Stripped from CSV to avoid storing
-    # a redundant column.
-    trades["contribution_pct"] = trades["weight"] * trades["actual_return_pct"]
+    # Derived: daily-portfolio contribution.
+    # Stripped from CSV to avoid storing a redundant column.
+    trades["contribution_pct"] = (
+        trades["weight"] * trades["allotment_ratio"] * trades["actual_return_pct"]
+    )
     with open(art_dir / "meta.json") as f:
         meta = json.load(f)
     github_url = cfg.get("dashboard", {}).get("github_url", "#")
@@ -90,11 +91,14 @@ def load_artifacts() -> tuple[pd.DataFrame, dict, str]:
 def compute_daily(trades: pd.DataFrame) -> pd.DataFrame:
     """Aggregate per-IPO trades into per-day portfolio metrics + baselines."""
     def _day_row(g: pd.DataFrame) -> pd.Series:
+        # Equal-weight baseline: 1/n on every IPO that day, allotment-adjusted
+        # (1/n × allotmentᵢ × rᵢ summed across IPOs == mean of allotment × return).
+        ew_contrib = g["allotment_ratio"] * g["actual_return_pct"]
         return pd.Series({
             "num_ipos": len(g),
             "strategy_return_pct": g["contribution_pct"].sum(),
             "strategy_allocation": g["weight"].sum(),
-            "equal_weight_return_pct": g["actual_return_pct"].mean(),
+            "equal_weight_return_pct": ew_contrib.mean(),
         })
 
     daily = trades.groupby("date").apply(_day_row).reset_index()
@@ -225,7 +229,7 @@ def _fmt_metric_value(metric_key: str, value: float) -> str:
 
 def _metric_y_title(metric_key: str) -> str:
     if metric_key == "cum_return":
-        return "Equity (indexed to 100, log scale)"
+        return "Cumulative Return (%)"
     if metric_key in FRACTIONAL_METRICS or metric_key in ALREADY_PERCENT_METRICS:
         return f"{METRICS[metric_key]} (%)"
     return METRICS[metric_key]
@@ -249,7 +253,6 @@ def _build_metric_chart(view: pd.DataFrame, metric_key: str, period_label: str) 
 
     values, hovers = [], []
     min_days = MIN_DAYS_FOR.get(metric_key, 1)
-    log_y = metric_key == "cum_return"
 
     for _, row in view.iterrows():
         plabel = _fmt_period(row["period"], period_label)
@@ -258,13 +261,10 @@ def _build_metric_chart(view: pd.DataFrame, metric_key: str, period_label: str) 
 
         if metric_key == "cum_return":
             raw = float(row.get("cum_return", 0.0)) if pd.notna(row.get("cum_return", np.nan)) else 0.0
-            equity = 100.0 * (1 + raw / 100.0)
-            # log scale requires positive y; floor just in case of extreme drawdown
-            equity = max(equity, 1e-6)
-            values.append(equity)
+            values.append(raw)
             hovers.append(
                 f"<b>{plabel}</b><br>"
-                f"Equity: {equity:.2f}  ({raw:+.2f}%)<br>"
+                f"Cumulative Return: {raw:+.2f}%<br>"
                 f"Days: {num_days} · IPOs: {num_ipos}"
             )
         elif num_days < min_days:
@@ -322,9 +322,9 @@ def _build_metric_chart(view: pd.DataFrame, metric_key: str, period_label: str) 
     )
     fig.update_yaxes(
         showgrid=True, gridcolor=grid, griddash="dot",
-        zeroline=not log_y, zerolinecolor="gray",
-        type="log" if log_y else "linear",
-        rangemode="normal" if log_y else "tozero",
+        zeroline=True, zerolinecolor="gray",
+        type="linear",
+        rangemode="tozero",
     )
     return fig
 
@@ -356,9 +356,8 @@ def _render_window_kpis(daily_view: pd.DataFrame) -> None:
     )
     r1[2].metric("IPOs Evaluated", num_ipos)
     r1[3].metric(
-        "Cumulative Return (Event-Compounded)", f"{cum:+.2f}%",
-        help="Compounded only across IPO trading days "
-             "(event-based, not continuous daily compounding).",
+        "Cumulative Return", f"{cum:+.2f}%",
+        help="Total compounded portfolio return over the period.",
     )
     r1[4].metric(
         "Avg Return per Trade Day", f"{mean_r:+.2f}%",
@@ -394,7 +393,8 @@ def render_header(meta: dict, github_url: str) -> None:
         f"the daily opportunity set down to high-quality bets. "
         f"Results below are from a walk-forward backtest over **{meta['num_ipos_backtested']} IPOs** between "
         f"**{meta['data_range']['from']}** and **{meta['data_range']['to']}**. "
-        f"[View on GitHub]({github_url})."
+        f"For more details around the modeling approach and decision logic, "
+        f"check out the [GitHub repository]({github_url}) 🔗."
     )
     st.caption("Tip: switch between light and dark themes from the ⋮ menu (top-right) → Settings → Choose app theme.")
 
@@ -411,29 +411,39 @@ def render_holdout_kpis(meta: dict) -> None:
     )
     r1[2].metric("IPOs Evaluated", hd.get("num_ipos", "—"))
     r1[3].metric(
+        "Cumulative  Return",
+        f"{hd.get('cum_return', 0):+.2f}%",
+        help="Total compounded portfolio return over the period.",
+    )
+    r1[4].metric(
         "Avg Return per Trade Day", f"{hd.get('mean_daily_return', 0):+.2f}%",
         help="Average portfolio return across IPO trading days.",
     )
-    r1[4].metric(
+
+    r2 = st.columns(5)
+    r2[0].metric(
         "Avg Return per Calendar Day",
         f"{hd.get('avg_return_per_calendar_day', 0):+.2f}%",
         help="Avg return adjusted for inactive days (no IPOs). "
              "Reflects true time-based performance.",
     )
-
-    r2 = st.columns(4)
-    r2[0].metric("Win Rate (Trade Days)", f"{hd.get('win_rate', 0) * 100:.1f}%")
-    r2[1].metric(
+    r2[1].metric("Win Rate (Trade Days)", f"{hd.get('win_rate', 0) * 100:.1f}%")
+    r2[2].metric(
         "% Trade Days Deployed", f"{hd.get('pct_days_traded', 0) * 100:.1f}%",
         help="Fraction of IPO trading days on which capital was actually allocated.",
     )
-    r2[2].metric("Return Volatility (Trade Days)", f"{hd.get('volatility', 0):.2f}%")
-    r2[3].metric("Sharpe Ratio (Trade-Day, Approx.)", f"{hd.get('sharpe_like', 0):+.2f}")
+    r2[3].metric("Return Volatility (Trade Days)", f"{hd.get('volatility', 0):.2f}%")
+    r2[4].metric("Sharpe Ratio (Trade-Day, Approx.)", f"{hd.get('sharpe_like', 0):+.2f}")
 
 
 def render_body(trades: pd.DataFrame, daily: pd.DataFrame) -> None:
     st.markdown("---")
     st.subheader("Strategy performance over time")
+    st.caption(
+        "💡 Tip: click any point on the chart and scroll down to see the "
+        "individual IPO trades that produced it. Use the ◄ ► arrows beside "
+        "the chart to navigate between consecutive years when viewing a monthly or quarterly timeline."
+    )
 
     # Top: metric + timeline selectors. The ? tooltip next to the "Metric"
     # label shows definitions for all metrics.
@@ -555,13 +565,33 @@ def _render_drilldown(
     # Anchor so we can smoothly scroll here on chart-point click.
     st.markdown('<div id="drilldown-anchor"></div>', unsafe_allow_html=True)
     st.markdown("---")
-    st.subheader(f"Drilldown · {_fmt_period(sel_period, period_label)}")
+    st.markdown(
+        f"""
+        <div style="
+            margin: 8px 0 18px 0;
+            padding: 14px 20px;
+            background: linear-gradient(90deg,
+                rgba(99,102,241,0.18) 0%,
+                rgba(99,102,241,0.04) 100%);
+            border-left: 6px solid #6366f1;
+            border-radius: 6px;
+            font-size: 1.45rem;
+            font-weight: 600;
+            letter-spacing: 0.2px;">
+            🔍 Drilldown &nbsp;·&nbsp;
+            <span style="color:#6366f1;">
+              {_fmt_period(sel_period, period_label)}
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     _render_window_kpis(period_daily)
 
     with st.expander("Show individual IPO trades (grouped by day)", expanded=True):
         st.caption(
             "Each day rendered as its own block with a date header. "
-            "🟢 profitable trade · 🔴 losing trade · ⚪ not traded (weight = 0)."
+            "🟢 Profitable Trade · 🔴 Losing Trade · ⚪ Not Traded (weight = 0)."
         )
         show = period_trades.sort_values(
             ["date", "contribution_pct"], ascending=[True, False]
@@ -582,18 +612,22 @@ def _render_drilldown(
                             border-left: 6px solid {color};
                             border-radius: 4px; font-size: 1.05rem;">
                     📅 <b>{date_str}</b> &nbsp;·&nbsp; {len(day_df)} IPO(s)
-                    &nbsp;·&nbsp; day return:
+                    &nbsp;·&nbsp; Day Return:
                     <span style="color:{color};"><b>{day_portfolio_ret:+.2f}%</b></span>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
             day_view = day_df.rename(columns={
-                "company": "Company", "prob": "Prob", "weight": "Weight",
-                "actual_return_pct": "Actual Return %",
-                "contribution_pct": "Contribution %", "allocated": "Allocated",
-            })[["Company", "Prob", "Weight",
-                "Actual Return %", "Contribution %", "Allocated"]].reset_index(drop=True)
+                "company": "Company",
+                "prob": "Probability",
+                "weight": "Weight",
+                "actual_return_pct": "Listing Gain (%)",
+                "contribution_pct": "Portfolio Contribution (%)",
+                "allocated": "Traded",
+            })[["Company", "Probability", "Weight",
+                "Listing Gain (%)", "Portfolio Contribution (%)",
+                "Traded"]].reset_index(drop=True)
             st.write(_style_drilldown(day_view).to_html(), unsafe_allow_html=True)
 
     # Smooth-scroll the user to this section on rerun (triggered by point click).
@@ -611,11 +645,11 @@ def _render_drilldown(
 def _style_drilldown(df: pd.DataFrame):
     """Color rows bright green/red by profitability; gray for non-traded."""
     def row_styles(row: pd.Series) -> list[str]:
-        if "Allocated" in row.index:
-            allocated = bool(row["Allocated"])
+        if "Traded" in row.index:
+            allocated = bool(row["Traded"])
         else:
             allocated = float(row.get("Weight", 0) or 0) > 0
-        ret = row["Actual Return %"]
+        ret = row["Listing Gain (%)"]
         if not allocated:
             base = ("background-color: rgba(130,130,130,0.18);"
                     " color: #888; font-style: italic;")
@@ -645,14 +679,14 @@ def render_baseline_chart(daily: pd.DataFrame) -> None:
         "**Equal-weight (all)**: 1/n on every IPO that day (no filter)."
     )
     d = daily.copy()
-    d["strategy_eq"] = 100 * (1 + d["strategy_return_pct"] / 100).cumprod()
-    d["ew_eq"] = 100 * (1 + d["equal_weight_return_pct"].fillna(0) / 100).cumprod()
+    d["strategy_cum"] = ((1 + d["strategy_return_pct"] / 100).cumprod() - 1) * 100
+    d["ew_cum"] = ((1 + d["equal_weight_return_pct"].fillna(0) / 100).cumprod() - 1) * 100
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=d["date"], y=d["strategy_eq"], mode="lines", name="Strategy"))
-    fig.add_trace(go.Scatter(x=d["date"], y=d["ew_eq"], mode="lines", name="Equal-weight (all)"))
+    fig.add_trace(go.Scatter(x=d["date"], y=d["strategy_cum"], mode="lines", name="Strategy"))
+    fig.add_trace(go.Scatter(x=d["date"], y=d["ew_cum"], mode="lines", name="Equal-weight (all)"))
     fig.update_layout(
-        yaxis_title="Equity (indexed to 100, log scale)",
+        yaxis_title="Cumulative Return (%)",
         xaxis_title="Date",
         hovermode="x unified",
         margin=dict(l=20, r=20, t=30, b=20),
@@ -665,7 +699,10 @@ def render_baseline_chart(daily: pd.DataFrame) -> None:
     )
     grid = "lightgray"
     fig.update_xaxes(showgrid=True, gridcolor=grid, griddash="dot")
-    fig.update_yaxes(showgrid=True, gridcolor=grid, griddash="dot", type="log")
+    fig.update_yaxes(
+        showgrid=True, gridcolor=grid, griddash="dot",
+        zeroline=True, zerolinecolor="gray", rangemode="tozero",
+    )
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -679,11 +716,29 @@ def render_example_day(meta: dict) -> None:
         "A real day sampled from the backtest showing each IPO's predicted probability, "
         "allocated weight, and realized listing-day return."
     )
-    df = pd.DataFrame(ex["ipos"]).rename(columns={
-        "company": "Company", "prob": "Prob", "weight": "Weight",
-        "actual_return_pct": "Actual Return %",
+    df = pd.DataFrame(ex["ipos"])
+    # Derive Portfolio Contribution % to match the drilldown schema. allotment_ratio
+    # is available when example_day is regenerated against the latest build_artifacts.
+    if "allotment_ratio" in df.columns:
+        df["contribution_pct"] = (
+            df["weight"] * df["allotment_ratio"] * df["actual_return_pct"]
+        ).round(4)
+    else:
+        df["contribution_pct"] = (df["weight"] * df["actual_return_pct"]).round(4)
+    df = df.rename(columns={
+        "company": "Company",
+        "prob": "Probability",
+        "weight": "Weight",
+        "actual_return_pct": "Listing Gain (%)",
+        "contribution_pct": "Portfolio Contribution (%)",
+        "allocated": "Traded",
     })
-    st.caption("🟢 profitable trade · 🔴 losing trade · ⚪ not traded (weight = 0).")
+    cols = ["Company", "Probability", "Weight",
+            "Listing Gain (%)", "Portfolio Contribution (%)"]
+    if "Traded" in df.columns:
+        cols.append("Traded")
+    df = df[cols]
+    st.caption("🟢 Profitable Trade · 🔴 Losing Trade · ⚪ Not Traded (weight = 0).")
     st.write(_style_drilldown(df).to_html(), unsafe_allow_html=True)
 
 
@@ -691,8 +746,10 @@ def render_api_form() -> None:
     st.markdown("---")
     st.subheader("Try the prediction API")
     st.caption(
-        f"POSTs to `{API_URL}`. Start the FastAPI server with `python -m app.main` "
-        f"(override via env var `DASHBOARD_API_URL`)."
+        "Test the live model end-to-end. Fill in an IPO's public details as they "
+        "stand at the close of its bidding window and submit. The API returns the "
+        "model's predicted probability of a positive listing-day gain along with "
+        "the portfolio weight the strategy would assign on the spot."
     )
 
     with st.form("predict_form"):
@@ -742,18 +799,32 @@ def render_api_form() -> None:
             st.error(f"API returned {resp.status_code}: {resp.text}")
 
 
-def render_disclaimers(meta: dict) -> None:
-    st.markdown("---")
-    st.subheader("Disclaimers")
-    st.warning(
-        f"- Assumes **100% IPO allotment** — real retail allotments are lottery-based.\n"
+def render_methodology(meta: dict) -> None:
+    """Methodology + assumptions, shown right after the holdout KPI strip
+    so readers see the framing alongside the numbers."""
+    st.info(
+        f"**📈 How the strategy works**\n\n"
+        f"- Investments are simulated from the **HNI (Non-Institutional Investor)** "
+        f"category. Per-IPO allotment is approximated as "
+        f"`1 / max(1, NII subscription multiple)` — oversubscribed issues yield a "
+        f"pro-rata fraction. Each IPO's contribution to the daily portfolio return is "
+        f"`weight × allotment × listing-day return`.\n"
+        f"- On any given day, capital is split **equally** across all IPOs whose "
+        f"predicted probability exceeds `t_min`.\n"
         f"- Strategy parameters: **t_min = {meta['t_min']:.4f}**, "
         f"**listing-gain threshold = {meta['listing_gain_threshold_perc']}%**.\n"
-        f"- Capital is split **equally** across all IPOs on a given day whose "
-        f"predicted probability meets `t_min` — no per-IPO cap.\n"
         f"- Last training date: **{meta.get('last_training_date', '—')}**.\n"
-        f"- Transaction costs and taxes assumed zero.\n"
-        f"- Not investment advice. Past performance does not guarantee future results."
+        f"- Transaction costs and taxes assumed zero."
+    )
+
+
+def render_disclaimer(github_url: str) -> None:
+    st.markdown("---")
+    st.caption(
+        f"📂 Source code & methodology: [GitHub repository]({github_url})."
+    )
+    st.caption(
+        "** Not investment advice. Past performance does not guarantee future results."
     )
 
 
@@ -793,11 +864,12 @@ def main() -> None:
 
     render_header(meta, github_url)
     render_holdout_kpis(meta)
+    render_methodology(meta)
     render_body(trades, daily)
     render_baseline_chart(daily)
     render_example_day(meta)
     render_api_form()
-    render_disclaimers(meta)
+    render_disclaimer(github_url)
 
 
 if __name__ == "__main__":
