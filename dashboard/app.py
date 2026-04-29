@@ -804,7 +804,7 @@ def render_methodology(meta: dict) -> None:
     so readers see the framing alongside the numbers."""
     st.info(
         f"**📈 How the strategy works**\n\n"
-        f"- Investments are simulated from the **HNI (Non-Institutional Investor)** "
+        f"- Investments are simulated from the **NII (Non-Institutional Investor)** "
         f"category. Per-IPO allotment is approximated as "
         f"`1 / max(1, NII subscription multiple)` — oversubscribed issues yield a "
         f"pro-rata fraction. Each IPO's contribution to the daily portfolio return is "
