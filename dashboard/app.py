@@ -819,7 +819,6 @@ def render_methodology(meta: dict) -> None:
 
 
 def render_disclaimer(github_url: str) -> None:
-    st.markdown("---")
     st.caption(
         f"📂 Source code & methodology: [GitHub repository]({github_url})."
     )
