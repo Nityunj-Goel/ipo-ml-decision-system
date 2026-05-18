@@ -28,40 +28,46 @@ Each section follows the same shape: the context that raised the question, the d
 ### The original design
 On any given day with `k` IPOs above `t_min`, capital was to be split using:
 ```
-wᵢ ∝ pᵢ^α        with α tuned over {-0.5, -0.25, 0, 0.5, 1, 2}
+wᵢ ∝ allotmentᵢ × pᵢ^α        with α tuned over {-0.5, -0.25, 0, 0.5, 1, 2}
 ```
 where:
-- `α = 0` recovers equal weighting,
+- `α = 0` recovers pure allotment-weighting (bid in proportion to how much each
+  IPO will actually fill),
 - `α > 0` concentrates capital on higher-probability IPOs,
 - `α < 0` mildly diversifies toward lower-probability IPOs.
 
-The intuition was that the model's confidence is a stand-in for inverse risk, and capital should follow that signal.
+The intuition combined two factors. First, the model's confidence is a stand-in
+for inverse risk, so capital should follow that signal. Second, daily portfolio
+return is `Σ wᵢ × allotmentᵢ × rᵢ` — the allotment factor sits inside the very
+objective the allocator is trying to maximize, so weighting bids by allotment
+aligns the rule with deployed-capital efficiency: a rupee bid on a heavily
+oversubscribed IPO contributes only a fraction to actual deployment.
 
 ### Why this formulation?
-The reasoning was first-principles. An optimal portfolio allocator should size each position by the IPO's risk-adjusted expected return. But on this dataset, expected return cannot be reliably estimated (see [Section 2](#2-why-classification-instead-of-regression)). All what the model produces is a probability, which is best read as a *risk signal*: a higher probability means a lower risk that the trade fails to clear the threshold.
+The reasoning was first-principles. An optimal portfolio allocator should size each position by the IPO's risk-adjusted expected return. But on this dataset, expected return cannot be reliably estimated (see [Section 2](#2-why-classification-instead-of-regression)). All what the model produces is a probability, which is best read as a *risk signal*: a higher probability means a lower risk that the trade fails to clear the threshold. Deployment efficiency, on the other hand, can be read off directly from the NII subscription multiple (see [Section 8](#8-how-allotment-is-approximated-and-what-that-trades-away)).
 
 That leaves three plausible allocation rules to size positions purely on risk:
 
 1. **Equal weight (`wᵢ = 1/k`).** Treats every surviving IPO the same. Robust, but ignores the fact that some IPOs are clearly less risky than others.
-2. **Linear in probability (`wᵢ ∝ pᵢ`).** Tilts capital toward higher-confidence IPOs. The direction is sensible (safer IPOs get more capital), but there is no guarantee the gradient is right. It might be too cautious or too aggressive.
-3. **Power-law in probability (`wᵢ ∝ pᵢ^α`).** Generalizes both. The exponent `α` controls how sharply the allocator concentrates capital with confidence:
-   - `α = 0` recovers equal weighting.
-   - `α = 1` recovers the linear rule.
+2. **Linear in probability, allotment-scaled (`wᵢ ∝ allotmentᵢ × pᵢ`).** Tilts capital toward higher-confidence IPOs and toward IPOs where the bid actually translates to deployed shares. The direction is sensible, but there is no guarantee the gradient is right. It might be too cautious or too aggressive.
+3. **Power-law in probability, allotment-scaled (`wᵢ ∝ allotmentᵢ × pᵢ^α`).** Generalizes (2). The exponent `α` controls how sharply the allocator concentrates capital with confidence; the `allotmentᵢ` factor stays fixed and keeps the rule aligned with the deployed-return objective:
+   - `α = 0` recovers pure allotment-weighting.
+   - `α = 1` recovers the linear-in-probability rule.
    - `α > 1` concentrates capital even more aggressively on the highest-`pᵢ` IPOs.
    - `α < 0` inverts the tilt. Lower-`pᵢ` IPOs get more weight, a deliberate diversification stance for cases where the model overweights its own confidence.
 
-Treating `α` as a hyperparameter is what makes the formulation principled. Rather than guessing whether equal-weighting or linear-in-`pᵢ` is the right gradient, the data picks. The grid `α ∈ {-0.5, -0.25, 0, 0.5, 1, 2}` was tuned via backtesting alongside `t_min` which resulted in the optimal value of `α ~ 1.98.`
+Treating `α` as a hyperparameter is what makes the formulation principled. Rather than guessing whether pure allotment-weighting or a linear-in-`pᵢ` tilt is the right gradient, the data picks. The grid `α ∈ {-0.5, -0.25, 0, 0.5, 1, 2}` was tuned via backtesting alongside `t_min` which resulted in the optimal value of `α ~ 1.98.`
 
 ### What backtesting showed
 Two findings:
 
-1. The tuned `pᵢ^α` rule barely outperformed plain equal-weighting (`α = 0`) on the days where it had a choice to make.
+1. The tuned `allotmentᵢ × pᵢ^α` rule barely outperformed plain equal-weighting (a flat `wᵢ = 1/k`, which sits outside this parametric family) on the days where it had a choice to make.
 2. On most days, it had no choice to make. EDA revealed that **~85% of IPO closing days have only a single IPO**. On those days `α` is mathematically irrelevant: there is one IPO, it gets all the capital, end of story.
 
-Net effect: the allocation rule was tuning a parameter that mattered on 15% of days, and even there only marginally.
+Net effect: the allocation rule was tuning a parameter that mattered on 15% of days, and even there only marginally. The allotment factor inside the formula is similarly inert on single-IPO days — it scales a number that gets normalized back to 1 — so its theoretical motivation only earns its keep on the 15% of multi-IPO days, and not by enough to dominate the simpler baseline.
 
 ### Decision
-Drop the `pᵢ^α` formulation. Use plain equal weighting among IPOs that pass `t_min`.
+Drop the `allotmentᵢ × pᵢ^α` formulation. Use plain equal weighting among IPOs that pass `t_min`. (The allotment factor still appears at the return-accounting layer — daily portfolio return is computed as `Σ wᵢ × allotmentᵢ × rᵢ` — but it no longer enters the bid-weighting rule.)
 
 ### Why this is the right call here
 Three reasons:
@@ -71,7 +77,7 @@ Three reasons:
 3. **Less to retune as the model changes.** Every retraining iteration would otherwise need an `α` retune to stay coherent.
 
 ### What this trades away
-On rare days with several high-conviction IPOs that differ a lot in predicted probability, equal weighting leaves a small amount of expected value on the table. The tradeoff is acceptable given how rarely those days occur.
+On rare days with several high-conviction IPOs that differ a lot in predicted probability or in allotment efficiency, equal weighting leaves a small amount of expected value on the table — both the probability-aware tilt and the deployment-efficiency tilt are sacrificed. The tradeoff is acceptable given how rarely those days occur.
 
 ### Takeaway
 > Match the strategy's complexity to the structure of the opportunities. A sophisticated allocator on a dataset that mostly does not need allocation is just a more elaborate way to overfit.
@@ -332,7 +338,7 @@ A more comprehensive feature set that might catch outlier IPOs whose subscriptio
 ## 12. Evaluation Setup: Time-Based Holdout, TimeSeriesSplit, gap=30
 
 ### Why time-based, not random
-IPO outcomes are not IID. Market regimes shift, regulatory environments change, GMP reporting evolves. A random train/test split would let the model peek at the future via leakage from later cohorts into training folds. A time-based split forces the evaluation to mirror how the model would actually be used: train on the past, predict on the future.
+IPO outcomes are not IID (Independent and Identically Distributed). Market regimes shift, regulatory environments change, GMP reporting evolves. A random train/test split would let the model peek at the future via leakage from later cohorts into training folds. A time-based split forces the evaluation to mirror how the model would actually be used: train on the past, predict on the future.
 
 ### Why holdout = last 15%
 A time-based holdout requires reserving the most recent block of data. 15% is the standard tradeoff:
@@ -347,11 +353,3 @@ An IPO listing on day `T` could in principle leak information about market condi
 
 ### What this trades away
 Slightly less effective sample usage. Each CV fold pays a 30-IPO buffer cost. On a 444-IPO evaluation dataset that is not free, but it is the right price to pay to keep the evaluation faithful to the deployment scenario.
-
----
-
-## ✏️ A note on how this file is meant to evolve
-
-Decisions are not final. As more IPO data accumulates, as the strategy is refined, or as the deployment context changes, some of the tradeoffs above will be revisited.
-
-When that happens, the right move is to update the relevant section in place rather than appending a new one. The goal of this file is to be a current snapshot of why the system looks the way it does today, not a changelog.
