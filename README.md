@@ -151,7 +151,7 @@ The **same `sklearn.Pipeline` definition** feeds two execution branches. What di
 
 ![Training and serving topology](artifacts/training_topology.png)
 
-- 🟢 **Production branch.** The pipeline is fit once on the full pre-holdout window, serialized to `artifacts/models/prediction_pipeline.joblib`, and loaded by the FastAPI service at startup. Every `/predict` call reuses that single fitted artifact, no retrain at request time.
+- 🟢 **Production branch.** Once selection and evaluation finalize, the pipeline is fit on the **full dataset** (CV window + holdout combined, so the deployed model sees the most recent IPOs available), serialized to `artifacts/models/prediction_pipeline.joblib`, and loaded by the FastAPI service at startup. Every `/predict` call reuses that single fitted artifact, no retrain at request time.
 - 🔵 **Evaluation branch.** The same pipeline definition is re-fit walk-forward across `TimeSeriesSplit(n_splits=5, gap=30)`. Each fold's val-window predictions are concatenated into a flat trade ledger (`artifacts/dashboard/trades.csv`) and saved alongside run metadata (`meta.json`). The Streamlit dashboard reads both as its sole data source.
 
 ---
