@@ -1,13 +1,12 @@
 """Dashboard entrypoint — see ``dashboard/__init__.py`` for package docs."""
 import json
-import os
 import sys
 from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -15,6 +14,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from app.inference import InferenceService
+from src.pipelines.inference_pipeline import InferencePipeline
 from src.utils.utils import get_project_root, load_config
 
 
@@ -66,8 +67,19 @@ METRIC_DESCRIPTIONS = {
     ),
 }
 
-# This won't likely work in prod
-API_URL = os.environ.get("DASHBOARD_API_URL", "http://127.0.0.1:8000/predict")
+@st.cache_resource
+def load_inference_service() -> InferenceService:
+    """Load the trained model + threshold once per session and wrap it
+    in an in-process inference service. Avoids an HTTP hop so the dashboard
+    can run as a single Streamlit process (e.g. on Streamlit Community Cloud)."""
+    root = get_project_root()
+    cfg = load_config()
+    trained_pipeline = joblib.load(root / cfg["paths"]["model"])
+    inference_pipeline = InferencePipeline(
+        fitted_prediction_pipeline=trained_pipeline,
+        t_min=cfg["portfolio"]["trade_threshold"],
+    )
+    return InferenceService(inference_pipeline)
 
 
 @st.cache_data
@@ -742,61 +754,114 @@ def render_example_day(meta: dict) -> None:
     st.write(_style_drilldown(df).to_html(), unsafe_allow_html=True)
 
 
+def _render_single_ipo_inputs(idx: int) -> dict:
+    """Render the 9 input widgets for one IPO and return the raw values.
+    `idx` is used to scope widget keys so multiple IPO blocks coexist."""
+    c1, c2, c3 = st.columns(3)
+    nii = c1.number_input("NII (x)", min_value=0.0, value=50.0, key=f"nii_{idx}")
+    qib = c2.number_input("QIB (x)", min_value=0.0, value=30.0, key=f"qib_{idx}")
+    retail = c3.number_input("Retail (x)", min_value=0.0, value=10.0, key=f"retail_{idx}")
+
+    c1, c2, c3 = st.columns(3)
+    total = c1.number_input("Total (x)", min_value=0.01, value=25.0, key=f"total_{idx}")
+    year = c2.number_input("Year", min_value=2000, max_value=2100, value=2025, key=f"year_{idx}")
+    issue_amount = c3.number_input(
+        "Issue amount (Rs. cr.)", min_value=0.01, value=500.0, key=f"issue_amount_{idx}"
+    )
+
+    c1, c2, c3 = st.columns(3)
+    price_band_high = c1.number_input(
+        "Price band high (Rs.)", min_value=0.01, value=500.0, key=f"price_band_high_{idx}"
+    )
+    price_band_low = c2.number_input(
+        "Price band low (Rs.)", min_value=0.01, value=475.0, key=f"price_band_low_{idx}"
+    )
+    gmp_raw = c3.text_input(
+        "GMP (Rs., blank if unknown)", value="", key=f"gmp_{idx}"
+    )
+
+    return {
+        "nii": nii, "qib": qib, "retail": retail, "total": total,
+        "year": int(year), "issue_amount": issue_amount,
+        "price_band_high": price_band_high, "price_band_low": price_band_low,
+        "gmp_raw": gmp_raw,
+    }
+
+
 def render_api_form() -> None:
     st.markdown("---")
     st.subheader("Try the prediction API")
     st.caption(
-        "Test the live model end-to-end. Fill in an IPO's public details as they "
-        "stand at the close of its bidding window and submit. The API returns the "
-        "model's predicted probability of a positive listing-day gain along with "
-        "the portfolio weight the strategy would assign on the spot."
+        "Test the live model end-to-end. Fill in one or more IPOs' public details as "
+        "they stand at the close of a shared bidding window and submit. For each IPO "
+        "the model returns its predicted probability of a positive listing-day gain "
+        "along with the portfolio weight the strategy would assign on the spot. With "
+        "multiple IPOs, weights are normalized across the batch."
+    )
+
+    # Count selector lives outside the form so changing it re-renders the inputs.
+    num_ipos = st.number_input(
+        "Number of IPOs closing on the same day",
+        min_value=1, max_value=5, value=1, step=1,
+        key="num_ipos",
+        help="Add up to 5 IPOs to see how the model splits portfolio weights across them.",
     )
 
     with st.form("predict_form"):
-        c1, c2, c3 = st.columns(3)
-        nii = c1.number_input("NII (x)", min_value=0.0, value=50.0)
-        qib = c2.number_input("QIB (x)", min_value=0.0, value=30.0)
-        retail = c3.number_input("Retail (x)", min_value=0.0, value=10.0)
-
-        c1, c2, c3 = st.columns(3)
-        total = c1.number_input("Total (x)", min_value=0.01, value=25.0)
-        year = c2.number_input("Year", min_value=2000, max_value=2100, value=2025)
-        issue_amount = c3.number_input("Issue amount (Rs. cr.)", min_value=0.01, value=500.0)
-
-        c1, c2, c3 = st.columns(3)
-        price_band_high = c1.number_input("Price band high (Rs.)", min_value=0.01, value=500.0)
-        price_band_low = c2.number_input("Price band low (Rs.)", min_value=0.01, value=475.0)
-        gmp_raw = c3.text_input("GMP (Rs., blank if unknown)", value="")
+        raw_inputs: list[dict] = []
+        for i in range(int(num_ipos)):
+            if num_ipos > 1:
+                with st.expander(f"IPO #{i + 1}", expanded=(i == 0)):
+                    raw_inputs.append(_render_single_ipo_inputs(i))
+            else:
+                raw_inputs.append(_render_single_ipo_inputs(i))
 
         submitted = st.form_submit_button("Predict")
 
-    if submitted:
+    if not submitted:
+        return
+
+    # Parse GMP per IPO; fail fast on bad input.
+    ipos: list[dict] = []
+    for i, raw in enumerate(raw_inputs):
+        gmp_raw = raw.pop("gmp_raw")
         gmp = None
         if gmp_raw.strip():
             try:
                 gmp = float(gmp_raw)
             except ValueError:
-                st.error(f"GMP must be numeric or blank; got {gmp_raw!r}")
+                st.error(f"IPO #{i + 1}: GMP must be numeric or blank; got {gmp_raw!r}")
                 return
+        ipos.append({**raw, "gmp": gmp})
 
-        payload = {"ipos": [{
-            "nii": nii, "qib": qib, "retail": retail, "total": total,
-            "year": int(year), "issue_amount": issue_amount,
-            "price_band_high": price_band_high, "price_band_low": price_band_low,
-            "gmp": gmp,
-        }]}
+    try:
+        service = load_inference_service()
+        probabilities, weights = service.predict(ipos)
+    except Exception as e:
+        st.error(f"Inference failed: {e}")
+        return
 
-        try:
-            resp = requests.post(API_URL, json=payload, timeout=5)
-        except Exception as e:
-            st.error(f"Could not reach API: {e}")
-            return
+    st.success(f"Prediction received for {len(ipos)} IPO(s)")
 
-        if resp.status_code == 200:
-            st.success("Prediction received")
-            st.json(resp.json())
-        else:
-            st.error(f"API returned {resp.status_code}: {resp.text}")
+    # Headline table: one row per IPO with probability and allocation weight.
+    results_df = pd.DataFrame({
+        "IPO": [f"IPO #{i + 1}" for i in range(len(ipos))],
+        "Probability": [round(float(p), 4) for p in probabilities],
+        "Allocation Weight": [round(float(w), 4) for w in weights],
+    })
+    st.dataframe(results_df, use_container_width=True, hide_index=True)
+
+    # Raw API-shape response for callers who want to copy/paste.
+    with st.expander("Raw response"):
+        st.json({
+            "allocations": [
+                {
+                    "probability": round(float(probabilities[i]), 6),
+                    "allocation_weight": round(float(weights[i]), 6),
+                }
+                for i in range(len(ipos))
+            ]
+        })
 
 
 def render_methodology(meta: dict) -> None:

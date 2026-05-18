@@ -2,7 +2,7 @@
 
 A machine-learning based decision system for the Indian mainboard IPO market. The model predicts the probability that a freshly-issued IPO will list at more than a 5% gain over its issue price, and a backtested strategy converts those probabilities into daily portfolio allocations.
 
-> 🌐 **Live dashboard:** _<placeholder for Streamlit Cloud URL>_
+> 🌐 **Live dashboard:** [https://ipo-ml-decision-system.streamlit.app/](https://ipo-ml-decision-system.streamlit.app/)
 >
 > 💻 **Source:** [https://github.com/Nityunj-Goel/ipo-ml-decision-system](https://github.com/Nityunj-Goel/ipo-ml-decision-system)
 
@@ -12,7 +12,7 @@ A machine-learning based decision system for the Indian mainboard IPO market. Th
 
 - 🎯 **Task framing:** Binary classification — `P(listing_gain > 5%)` from pre-listing public signals (subscription multiples, issue size, price band, GMP, year, etc.).
 
-- 🤖 **Model:** **logistic regression** (elastic-net), chosen over random forest, XGBoost, and LightGBM on time-series CV ROC-AUC.
+- 🤖 **Model:** **logistic regression**, chosen over random forest, XGBoost, and LightGBM on time-series CV ROC-AUC.
 
 - ⚖️ **Decision rule:** On each IPO listing day, allocate capital equally across all IPOs whose predicted probability exceeds a learned threshold `t_min ≈ 0.41`. Per-IPO allotment is approximated as `1 / max(1, NII subscription multiple)` [ Assuming NII category ].
 
@@ -115,7 +115,7 @@ Full design history (including the original `wᵢ ∝ pᵢ^α` rule that was dro
 - 📦 720 IPOs after cleaning
 
 ### Feature set
-Pre-listing, publicly observable at end of bidding window:
+Pre-listing, publicly observable near the end of bidding window:
 
 | Feature                                  | Notes                                                                                                      |
 |------------------------------------------|------------------------------------------------------------------------------------------------------------|
@@ -134,26 +134,25 @@ Pre-listing, publicly observable at end of bidding window:
 
 ---
 
-## 4. 🏗️ Pipeline architecture
+## 4. 🧱 Pipeline architecture
 
-```
-Raw scraped data
-      │
-      ▼
-[Data Pipeline]   data collection → aggregation → cleaning → feature engineering
-      │
-      ▼
-[Model Pipeline]  preprocessing → feature selection → training → evaluation (ROC-AUC) → calibration
-      │
-      ▼
-[Decision Engine] probability → threshold filter → equal-weight allocation
-      │
-      ▼
-[Action]          API response / dashboard / (future: broker execution)
-```
+The system is organized as four conceptual stages with clean hand-offs between them. Each stage owns one responsibility and emits an artifact — a cleaned dataframe, a fitted pipeline, a probability, a capital allocation — that the next stage consumes.
 
-> 🖼️ _<placeholder: architecture diagram — to be added by author>_
+![Pipeline stages](artifacts/pipeline_architecture.png)
 
+- 🧹 **Data pipeline** — Aggregates raw data scraped from multiple sources, cleans malformed rows, and engineers the final feature set (subscription ratios, log transforms, GMP missingness flag).
+- 🤖 **Model pipeline** — A composed `sklearn.Pipeline` chains preprocessing, feature selection, and the binary classifier so every leakage-prone step is fit only on training data, fold by fold. Selection is driven by time-series CV ROC-AUC.
+- 🚦 **Decision engine** — Converts calibrated probabilities into trade-or-skip decisions via the learned `t_min` threshold, then splits capital equally across the survivors.
+- 🎯 **Action** — Live decisioning, broker order placement, and a post-listing exit policy. Currently **future scope** (dashed in the diagram) — see [§13 Future Scope](#13--future-scope).
+
+### Train-once, serve-twice
+
+The **same `sklearn.Pipeline` definition** feeds two execution branches. What differs is the *fit window* and the downstream consumer:
+
+![Training and serving topology](artifacts/training_topology.png)
+
+- 🟢 **Production branch.** Once selection and evaluation finalize, the pipeline is fit on the **full dataset** (CV window + holdout combined, so the deployed model sees the most recent IPOs available), serialized to `artifacts/models/prediction_pipeline.joblib`, and loaded by the FastAPI service at startup. Every `/predict` call reuses that single fitted artifact, no retrain at request time.
+- 🔵 **Evaluation branch.** The same pipeline definition is re-fit walk-forward across `TimeSeriesSplit(n_splits=5, gap=30)`. Each fold's val-window predictions are concatenated into a flat trade ledger (`artifacts/dashboard/trades.csv`) and saved alongside run metadata (`meta.json`). The Streamlit dashboard reads both as its sole data source.
 
 ---
 
@@ -200,7 +199,7 @@ AUC measures separability between the positive and negative class across all thr
 
 ---
 
-## 6. ⚖️ Decision engine
+## 6. 🚦 Decision engine
 
 ### Threshold filter
 On each IPO listing day, only IPOs with `prob ≥ t_min` are considered for trading. `t_min` is **learned, not assumed**. It's tuned in the backtester to maximize cumulative return / stability.
@@ -213,7 +212,7 @@ portfolio.trade_threshold: 0.4091   # learned via backtesting
 Capital is split **equally** among all IPOs that pass the threshold on a given day. This is a deliberate simplification of the originally proposed `wᵢ ∝ pᵢ^α` rule — see [Decisions.md → Allocation Strategy](Decisions.md#1-allocation-strategy-why-equal-weight-won).
 
 ### Allotment realism
-Per-IPO allotment is approximated as `1 / max(1, NII_subscription_multiple)`. Oversubscribed issues yield a pro-rata fraction of the requested shares, which removes the unrealistic "100% allotment" assumption from earlier iterations.
+Per-IPO allotment is approximated as `1 / max(1, NII_subscription_multiple)`. Oversubscribed issues yield a pro-rata fraction of the requested shares, which removes the unrealistic "100% allotment" assumption.
 
 ### Daily portfolio return formula
 ```
@@ -261,20 +260,20 @@ day_return    = Σ contributionᵢ
 | Sharpe-like               | +0.43       |
 
 #### 📊 Full backtest (2017 → 2025)
-| Metric                                                          | Value        |
-|-----------------------------------------------------------------|--------------|
-| Calendar days                                                   | 3,256        |
-| IPO trade days                                                  | 358          |
-| IPOs evaluated                                                  | 444          |
-| **Cumulative return (Strategy)**                                | **+242.54%** |
-| Cumulative return (Equal-weight allocation, no filter baseline) | **−54%**     |
-| Avg return / trade day                                          | +0.35%       |
-| Win rate (trade days)                                           | 62.0%        |
-| % trade days deployed                                           | 73.5%        |
-| Sharpe-like                                                     | +0.33        |
+| Metric                                                                   | Value        |
+|--------------------------------------------------------------------------|--------------|
+| Calendar days                                                            | 3,256        |
+| IPO trade days                                                           | 358          |
+| IPOs evaluated                                                           | 444          |
+| **Cumulative return (Strategy)**                                         | **+242.54%** |
+| Baseline Cumulative return (Equal-weight allocation, no filter baseline) | **−54%**     |
+| Avg return / trade day                                                   | +0.35%       |
+| Win rate (trade days)                                                    | 62.0%        |
+| % trade days deployed                                                    | 73.5%        |
+| Sharpe-like                                                              | +0.33        |
 
 ### Baseline comparison
-The selection-filtered strategy compounds positively across the full window while the unfiltered "equal-weight on every IPO" baseline ends sharply negative — confirming the model's value is in **filtering**, not in fine-grained allocation.
+The selection-filtered strategy compounds positively across the full window while the unfiltered "equal-weight on every IPO" baseline ends sharply negative — confirming the value delivered by the model.
 
 ### 🔍 Key insights from the backtest
 | Probability bucket | Avg listing-day return |
@@ -376,16 +375,16 @@ jupyter notebook notebooks/models.ipynb
 jupyter notebook notebooks/backtesting.ipynb
 python -m dashboard.build_artifacts
 
-# 4. Serve the model
+# 4. (Optional) Serve the standalone HTTP prediction API
 uvicorn app.main:app --host 127.0.0.1 --port 8000
 
-# 5. Launch the dashboard (in a separate shell)
+# 5. Launch the dashboard
 streamlit run dashboard/app.py
 ```
 
 ---
 
-## 12. ⚠️ Limitations & assumptions
+## 12. 🚨 Limitations & assumptions
 
 ### Modeling
 - Dataset is small by ML standards (720 IPOs after cleaning).
@@ -406,13 +405,14 @@ A black-swan IPO whose features fall outside the training distribution can produ
 
 ## 13. 🔮 Future scope
 
-- 📡 **Monitoring** — drift detection on input features and prediction distribution; automated alerts.
-- 🔁 **Retraining pipeline** — scheduled retrains as new IPOs list, with model registry / versioning.
-- ⏱️ **Live decisioning** — scheduled job that fetches open IPOs, runs predictions ~30 min before bidding close, and emits notifications (or trades).
-- ✅ **Pre-flight check** — a dry run at issue open to validate the end-to-end inference path before the real prediction run.
-- 🤝 **Broker integration** — order placement and exit strategy automation.
-- 🛠️ **CI/CD** — model registry, artifact versioning, deployment automation.
-- 🧮 **Multi-year fundamentals** — encode growth trends from prospectus financials (currently excluded due to schema inconsistency across filings; see [Decisions.md](Decisions.md)).
+- 📡 **Monitoring** — Drift detection on input features and prediction distribution; automated alerts.
+- 🔬 **Training–serving skew tracking** — Monitor per-feature deltas between end-of-bidding-day snapshots (used at training time) and pre-close snapshots (used at live inference), starting with subscription multiples. Quantifies how much the small training-vs-serving gap actually moves predictions.
+- 🔁 **Retraining pipeline** — Scheduled retrains as new IPOs list, with model registry / versioning.
+- ⏱️ **Live decisioning** — Scheduled job that fetches open IPOs, runs predictions ~30 min before bidding close, and emits notifications (or trades).
+- ✅ **Pre-flight check** — A dry run at issue open to validate the end-to-end inference path before the real prediction run.
+- 🤝 **Broker integration** — Order placement and exit strategy automation.
+- 🛠️ **CI/CD** — Model registry, artifact versioning, deployment automation.
+- 🧮 **Multi-year fundamentals** — Encode growth trends from prospectus financials (currently excluded due to schema inconsistency across filings; see [Decisions.md](Decisions.md#11-why-multi-year-company-financials-were-excluded)).
 
 ---
 

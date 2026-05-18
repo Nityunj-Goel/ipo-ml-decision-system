@@ -37,8 +37,10 @@ def run_cv_experiment(
 
     Returns:
         A dictionary containing fold-level AUC metrics, aggregated CV AUC
-        statistics, the final pipeline fitted on the CV window, and the
-        holdout split as (X_holdout, y_holdout).
+        statistics, the final pipeline fitted on the CV window (use this for
+        unbiased holdout scoring), the production pipeline fitted on the full
+        dataset (use this for the deployed/saved artifact), and the holdout
+        split as (X_holdout, y_holdout).
     """
     df = load_raw_dataset()
     config = load_config()
@@ -90,13 +92,20 @@ def run_cv_experiment(
     if verbose:
         _print_cv_summary(fold_df, cv_mean_auc, cv_std_auc, fold_reports)
 
+    # Trained on X_cv only — used to score the holdout without data leakage.
     final_pipeline = train(X_cv, model_type, listing_gain_threshold_perc=threshold, **model_kwargs)
+
+    # Trained on the full dataset (X_cv + X_holdout) — the version we ship.
+    # Every available labeled row contributes to the deployed model, since
+    # holdout's job (unbiased out-of-sample scoring) is already done above.
+    production_pipeline = train(df, model_type, listing_gain_threshold_perc=threshold, **model_kwargs)
 
     return {
         "fold_metrics": fold_df,
         "cv_mean_auc": cv_mean_auc,
         "cv_std_auc": cv_std_auc,
         "final_pipeline": final_pipeline,
+        "production_pipeline": production_pipeline,
         "holdout": (X_holdout, y_holdout),
     }
 
