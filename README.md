@@ -6,7 +6,7 @@ A machine-learning based decision system for the Indian mainboard IPO market. Th
 >
 > 💻 **Source:** [https://github.com/Nityunj-Goel/ipo-ml-decision-system](https://github.com/Nityunj-Goel/ipo-ml-decision-system)
 > 
-> 📚 **Design decisions and tradeoff analysis:** [Decisions.md](./decisions.md)
+> 📚 **Design decisions and tradeoff analysis:** [Decisions.md](./Decisions.md)
 
 ---
 
