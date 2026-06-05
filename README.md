@@ -5,21 +5,28 @@ A machine-learning based decision system for the Indian mainboard IPO market. Th
 > 🌐 **Live dashboard:** [https://ipo-ml-decision-system.streamlit.app/](https://ipo-ml-decision-system.streamlit.app/)
 >
 > 💻 **Source:** [https://github.com/Nityunj-Goel/ipo-ml-decision-system](https://github.com/Nityunj-Goel/ipo-ml-decision-system)
+> 
+> 📚 **Design decisions and tradeoff analysis:** [Decisions.md](./decisions.md)
 
 ---
 
 ## ⚡ TL;DR
 
-- 🎯 **Task framing:** Binary classification — `P(listing_gain > 5%)` from pre-listing public signals (subscription multiples, issue size, price band, GMP, year, etc.).
+- 🚦 **Inference and decision pipeline:** A walk-forward backtested pipeline that filters IPOs using calibrated probabilities and converts them into portfolio allocation decisions.
 
-- 🤖 **Model:** **logistic regression**, chosen over random forest, XGBoost, and LightGBM on time-series CV ROC-AUC.
+- 📊 **Evaluation setup:** Time-aware validation using `TimeSeriesSplit(gap=30)` with a final unseen holdout simulation to mimic real deployment conditions.
 
-- ⚖️ **Decision rule:** On each IPO listing day, allocate capital equally across all IPOs whose predicted probability exceeds a learned threshold `t_min ≈ 0.41`. Per-IPO allotment is approximated as `1 / max(1, NII subscription multiple)` [ Assuming NII category ].
+- 🔌 **Serving architecture:** deployment-ready FastAPI inference service + interactive Streamlit dashboard powered by precomputed offline backtest artifacts.
 
-- 🧪 **Holdout result** (unseen 2025 data, 75 trade days, 108 IPOs): Cumulative return **+16.4%**, mean per-trade-day return **+0.20%**, win rate **61.3%**, Sharpe-like **0.43**.
+- 🤖 **Model:** Logistic regression, selected over random forest, XGBoost, and LightGBM on time-series CV ROC-AUC.
 
-- 📊 **Full backtest** (2017–2025, 444 IPOs, 358 trade days): Cumulative return **+242.5%**, mean per-trade-day return **+0.35%**, win rate **62%**, Sharpe-like **0.33**.
+- ⚖️ **Decision rule:** On each IPO listing day, allocate capital equally across IPOs whose predicted probability exceeds a learned threshold `t_min ≈ 0.41`. Per-IPO allotment is approximated as `1 / max(1, NII subscription multiple)`.
 
+- 🧪 **Holdout result (unseen 2025 data, 75 trade days, 108 IPOs):** Cumulative return **+16.4%**, mean per-trade-day return **+0.20%**, win rate **61.3%**, Sharpe-like **0.43**.
+
+- 📊 **Full backtest (2017–2025, 444 IPOs, 358 trade days):** Cumulative return **+242.5%**, mean per-trade-day return **+0.35%**, win rate **62%**, Sharpe-like **0.33**.
+
+> Returns reflect a simplified execution simulation with approximate NII allotment modeling and no capital lock-up constraints.
 ---
 
 ## 🧭 Table of Contents
