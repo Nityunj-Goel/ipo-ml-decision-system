@@ -928,11 +928,11 @@ def main() -> None:
 
     render_header(meta, github_url)
     render_holdout_kpis(meta)
+    render_api_form()
     render_methodology(meta)
     render_body(trades, daily)
     render_baseline_chart(daily)
     render_example_day(meta)
-    render_api_form()
     render_disclaimer(github_url)
 
 
