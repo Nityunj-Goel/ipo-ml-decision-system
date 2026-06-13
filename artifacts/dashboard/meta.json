@@ -9,7 +9,7 @@
     "from": "2017-01-25",
     "to": "2025-12-24"
   },
-  "last_training_date": "2024-12-23",
+  "last_training_date": "2025-12-31",
   "num_ipos_backtested": 444,
   "holdout": {
     "num_days": 75,
